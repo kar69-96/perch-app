@@ -1,9 +1,10 @@
 //
 //  playbook-cache-check/main.swift
 //  Standalone, no-Xcode verification of the playbook caching core: the
-//  MATCH-directive parsing that decides update-vs-create, and the playbook
-//  store's list + update-in-place behavior that keeps slugs stable for
-//  schedules and agent-run cards.
+//  MATCH-directive parsing that flags a resemblance to an existing skill, and
+//  the playbook store's list + READ-ONLY behavior. Skills are never rewritten
+//  in place; a resemblance only routes through the logging-only
+//  proposeSkillUpdate seam.
 //
 //  Compiled by scripts/check-playbook-cache.sh together with the REAL product
 //  sources (WorkflowPlaybookSynthesizer / WorkflowPlaybookStore / …), so it
@@ -64,7 +65,7 @@ do {
     check(uppercaseNone.matchedSlug == nil, "NONE is recognized case-insensitively")
 }
 
-// MARK: - Store: update-in-place + listing
+// MARK: - Store: read-only (no self-rewrite) + listing
 
 func makeTemporaryStore() -> WorkflowPlaybookStore {
     WorkflowPlaybookStore(
@@ -73,7 +74,7 @@ func makeTemporaryStore() -> WorkflowPlaybookStore {
     )
 }
 
-print("store update-in-place:")
+print("store read-only (no self-rewrite):")
 do {
     let store = makeTemporaryStore()
     let original = try store.save(
@@ -81,32 +82,31 @@ do {
         title: "Fill contacts into Excel"
     )
 
-    let updated = try store.updateExistingPlaybook(
+    // The self-healing seam is a logging stub — it must not touch disk.
+    store.proposeSkillUpdate(
         slug: original.slug,
-        markdown: "# Fill contacts into spreadsheet\nRefined body."
+        suggestion: "# Fill contacts into spreadsheet\nRefined body."
     )
-    check(updated.slug == original.slug, "update preserves the slug")
-    check(updated.fileURL == original.fileURL, "update preserves the file URL")
-    check(updated.title == "Fill contacts into spreadsheet",
-          "title is re-extracted from the refined markdown")
+    let afterPropose = try store.load(slug: original.slug)
+    check(afterPropose.markdown == "# Fill contacts into Excel\nOriginal body.",
+          "proposeSkillUpdate never rewrites the original on disk")
 
-    let reloaded = try store.load(slug: original.slug)
-    check(reloaded.markdown == "# Fill contacts into spreadsheet\nRefined body.",
-          "refined markdown round-trips from disk")
+    // A second, look-alike demonstration is saved as its own new read-only
+    // skill (distinct slug + file); the original is left intact.
+    let lookalike = try store.save(
+        markdown: "# Fill contacts into Excel\nRefined body.",
+        title: "Fill contacts into Excel"
+    )
+    check(lookalike.slug != original.slug, "a look-alike save gets its own slug")
+    check(lookalike.fileURL != original.fileURL, "a look-alike save gets its own file")
+    check(try store.load(slug: original.slug).markdown == "# Fill contacts into Excel\nOriginal body.",
+          "the original skill is never overwritten by a look-alike")
 
     let markdownFiles = try FileManager.default
         .contentsOfDirectory(atPath: store.directoryURL.path)
         .filter { $0.hasSuffix(".md") }
-    check(markdownFiles.count == 1,
-          "save → update keeps exactly one file (no -2 duplicate)")
-
-    var unknownSlugThrew = false
-    do {
-        _ = try store.updateExistingPlaybook(slug: "never-saved", markdown: "# X")
-    } catch WorkflowPlaybookStoreError.playbookNotFound {
-        unknownSlugThrew = true
-    }
-    check(unknownSlugThrew, "updating an unknown slug throws playbookNotFound")
+    check(markdownFiles.count == 2,
+          "two demonstrations → two files (read-only, no in-place rewrite)")
 }
 
 print("store listing:")
