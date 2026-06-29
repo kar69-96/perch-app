@@ -5,7 +5,7 @@ import AsyncXPCConnection
 final class XPCHelperClient: NSObject {
     nonisolated static let shared = XPCHelperClient()
     
-    private let serviceName = "theboringteam.notch.NotchXPCHelper"
+    private let serviceName = "app.perch.notch.NotchXPCHelper"
     
     private var remoteService: RemoteXPCService<NotchXPCHelperProtocol>?
     private var connection: NSXPCConnection?

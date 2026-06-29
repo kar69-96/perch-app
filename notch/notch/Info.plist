@@ -11,8 +11,9 @@
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
-	<key>SUFeedURL</key>
-	<string>https://TheBoredTeam.github.io/boring.notch/appcast.xml</string>
+	<!-- No SUFeedURL: Perch does not point its updater at the upstream BoringNotch
+	     appcast (that would offer their releases as Perch updates). Until Perch has
+	     its own signed appcast, the updater has no feed and performs no checks. -->
 	<key>SUPublicEDKey</key>
 	<string>B1Y47t8C/v8ImurYA+9arEsuCrpxwJSviekiflMElbI=</string>
 	<key>UTImportedTypeDeclarations</key>
@@ -25,7 +26,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>theboringteam.notch.perch-deeplink</string>
+			<string>app.perch.notch.perch-deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>perch</string>
