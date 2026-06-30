@@ -34,6 +34,7 @@ enum BuddyTranscriptionProviderFactory {
         case assemblyAI = "assemblyai"
         case openAI = "openai"
         case appleSpeech = "apple"
+        case whisper = "whisper"
     }
 
     static func makeDefaultProvider() -> any BuddyTranscriptionProvider {
@@ -53,6 +54,12 @@ enum BuddyTranscriptionProviderFactory {
 
         if preferredProvider == .appleSpeech {
             return AppleSpeechTranscriptionProvider()
+        }
+
+        // Whisper is fully offline and opt-in only — it never joins the automatic
+        // fallback chain below, so the default cloud/Apple behavior is unchanged.
+        if preferredProvider == .whisper {
+            return WhisperTranscriptionProvider()
         }
 
         if preferredProvider == .assemblyAI {
