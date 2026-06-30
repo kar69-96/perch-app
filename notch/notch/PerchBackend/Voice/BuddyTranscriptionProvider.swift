@@ -34,6 +34,7 @@ enum BuddyTranscriptionProviderFactory {
         case assemblyAI = "assemblyai"
         case openAI = "openai"
         case appleSpeech = "apple"
+        case whisper = "whisper"
     }
 
     static func makeDefaultProvider() -> any BuddyTranscriptionProvider {
@@ -55,6 +56,12 @@ enum BuddyTranscriptionProviderFactory {
             return AppleSpeechTranscriptionProvider()
         }
 
+        // Force fully-offline Whisper even when a cloud provider is configured.
+        // (Whisper is also the automatic fallback below when no cloud provider is.)
+        if preferredProvider == .whisper {
+            return WhisperTranscriptionProvider()
+        }
+
         if preferredProvider == .assemblyAI {
             if assemblyAIProvider.isConfigured {
                 return assemblyAIProvider
@@ -67,8 +74,8 @@ enum BuddyTranscriptionProviderFactory {
                 return openAIProvider
             }
 
-            print("⚠️ Transcription: using Apple Speech as fallback")
-            return AppleSpeechTranscriptionProvider()
+            print("⚠️ Transcription: using Whisper (offline) as fallback")
+            return WhisperTranscriptionProvider()
         }
 
         if preferredProvider == .openAI {
@@ -83,8 +90,8 @@ enum BuddyTranscriptionProviderFactory {
                 return assemblyAIProvider
             }
 
-            print("⚠️ Transcription: using Apple Speech as fallback")
-            return AppleSpeechTranscriptionProvider()
+            print("⚠️ Transcription: using Whisper (offline) as fallback")
+            return WhisperTranscriptionProvider()
         }
 
         if assemblyAIProvider.isConfigured {
@@ -95,6 +102,8 @@ enum BuddyTranscriptionProviderFactory {
             return openAIProvider
         }
 
-        return AppleSpeechTranscriptionProvider()
+        // No cloud provider configured → fall back to fully-offline Whisper.
+        // (Apple Speech remains available as an explicit `apple` opt-in.)
+        return WhisperTranscriptionProvider()
     }
 }
