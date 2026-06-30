@@ -56,8 +56,8 @@ enum BuddyTranscriptionProviderFactory {
             return AppleSpeechTranscriptionProvider()
         }
 
-        // Whisper is fully offline and opt-in only — it never joins the automatic
-        // fallback chain below, so the default cloud/Apple behavior is unchanged.
+        // Force fully-offline Whisper even when a cloud provider is configured.
+        // (Whisper is also the automatic fallback below when no cloud provider is.)
         if preferredProvider == .whisper {
             return WhisperTranscriptionProvider()
         }
@@ -74,8 +74,8 @@ enum BuddyTranscriptionProviderFactory {
                 return openAIProvider
             }
 
-            print("⚠️ Transcription: using Apple Speech as fallback")
-            return AppleSpeechTranscriptionProvider()
+            print("⚠️ Transcription: using Whisper (offline) as fallback")
+            return WhisperTranscriptionProvider()
         }
 
         if preferredProvider == .openAI {
@@ -90,8 +90,8 @@ enum BuddyTranscriptionProviderFactory {
                 return assemblyAIProvider
             }
 
-            print("⚠️ Transcription: using Apple Speech as fallback")
-            return AppleSpeechTranscriptionProvider()
+            print("⚠️ Transcription: using Whisper (offline) as fallback")
+            return WhisperTranscriptionProvider()
         }
 
         if assemblyAIProvider.isConfigured {
@@ -102,6 +102,8 @@ enum BuddyTranscriptionProviderFactory {
             return openAIProvider
         }
 
-        return AppleSpeechTranscriptionProvider()
+        // No cloud provider configured → fall back to fully-offline Whisper.
+        // (Apple Speech remains available as an explicit `apple` opt-in.)
+        return WhisperTranscriptionProvider()
     }
 }

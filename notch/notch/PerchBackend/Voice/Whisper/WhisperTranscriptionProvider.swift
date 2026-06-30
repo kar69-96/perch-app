@@ -7,9 +7,10 @@ import Foundation
 /// the 16 kHz mono float that whisper.cpp expects, and runs the model when push-to-talk
 /// is released (`requestFinalTranscript`).
 ///
-/// This provider is only selected when `VoiceTranscriptionProvider` is explicitly set to
-/// `whisper`; it never enters the automatic fallback chain, so the default cloud/Apple
-/// behavior is unchanged.
+/// This provider is the automatic **offline fallback** — chosen when no cloud provider
+/// (AssemblyAI/OpenAI) is configured — and can also be forced via
+/// `VoiceTranscriptionProvider = whisper`. When a cloud provider IS configured it stays
+/// the default, so normal setups are unchanged.
 final class WhisperTranscriptionProvider: BuddyTranscriptionProvider {
     let displayName = "Whisper (offline)"
 
