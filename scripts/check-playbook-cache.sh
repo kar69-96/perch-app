@@ -11,18 +11,26 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-CB="boring.notch/boringNotch/ClickyBackend"
+CB="notch/notch/PerchBackend"
 BUILD_OUT="$(mktemp -t playbook-cache-check)"
 
 swiftc -swift-version 5 -target arm64-apple-macos14.2 \
-  boring.notch/boringNotch/Dashboard/ClickySupportPaths.swift \
+  notch/notch/Dashboard/PerchSupportPaths.swift \
   "$CB/Workflows/Capture/WorkflowDemonstrationModels.swift" \
   "$CB/Workflows/Playbook/WorkflowPlaybookStore.swift" \
   "$CB/Workflows/Playbook/WorkflowPlaybookSynthesizer.swift" \
   "$CB/Workflows/Capture/WorkflowVideoKeyframeExtractor.swift" \
+  "$CB/Overlay/WindowPositionManager.swift" \
   "$CB/Capture/CompanionScreenCaptureUtility.swift" \
   "$CB/Capture/AccessibilityTreeSnapshotter.swift" \
   "$CB/Workflows/Agent/WorkflowAgentModels.swift" \
+  "$CB/Telemetry/PerchRunLog.swift" \
+  "$CB/Telemetry/PerchDebugLog.swift" \
+  "$CB/Telemetry/TurnTraceAccumulator.swift" \
+  "$CB/Telemetry/TelemetryConsent.swift" \
+  "$CB/Telemetry/TurnTraceUploader.swift" \
+  "$CB/Identity/PerchEntitlement.swift" \
+  "$CB/Identity/PerchInstallIdentity.swift" \
   "$CB/LLM/ClaudeAPI.swift" \
   "$CB/AppBundleConfiguration.swift" \
   "$CB/Telemetry/WorkflowDebugLog.swift" \
