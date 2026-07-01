@@ -7,38 +7,41 @@
 //  screen, and — when it doesn't — Cerebras answers the query directly so the
 //  app never captures a screenshot or pays for a multimodal round-trip.
 //
-//  The Cerebras free tier is text-only (no image input) and serves reasoning
-//  models, so every call sends `reasoning_effort: "none"` to get a clean, direct
-//  answer with no chain-of-thought tokens (Perch replies are one short sentence).
+//  The Cerebras key lives ONLY on the Worker: these calls go through the Worker's
+//  `/vision-gate` route (authenticated with the per-install token), so the app
+//  ships no provider key. The OpenAI chat-completions request/response bodies are
+//  forwarded verbatim by the Worker.
 //
-//  Mirrors the request/response shape of OpenAIAPI.swift (Bearer auth, OpenAI
-//  chat-completions) and the (text, duration) return shape of ClaudeAPI.swift.
+//  Cerebras serves reasoning models, so every call sends `reasoning_effort:
+//  "none"` to get a clean, direct answer with no chain-of-thought tokens (Perch
+//  replies are one short sentence).
+//
+//  Mirrors the (text, duration) return shape of ClaudeAPI.swift.
 //
 
 import Foundation
 
-/// Cerebras configuration, read from the repo `.env` (process environment wins
-/// first, mirroring the `CLICKY_LLM_BACKEND` precedence). The API key lives only
-/// in the gitignored `.env`; it is never committed.
+/// Vision-gate (Cerebras) configuration. The Cerebras API key lives only on the
+/// Worker — the app never carries it. These calls go through the Worker's
+/// `/vision-gate` route and authenticate with the per-install token, exactly like
+/// every other proxied call (`ClaudeAPI`, `ElevenLabsTTSClient`). Only the model
+/// name is still a local knob (sent in the request body, overridable via `.env`).
 enum CerebrasConfiguration {
 
-    /// Cerebras' OpenAI-compatible chat-completions endpoint.
-    static let chatCompletionsURL = URL(string: "https://api.cerebras.ai/v1/chat/completions")!
+    /// The Worker's vision-gate route. Reads the same `WorkerBaseURL` Info.plist
+    /// key the rest of the backend uses, so switching backends needs no code edit.
+    static var visionGateURL: URL {
+        let workerBaseURL = AppBundleConfiguration.stringValue(forKey: "WorkerBaseURL")
+            ?? "https://your-worker-name.your-subdomain.workers.dev"
+        return URL(string: "\(workerBaseURL)/vision-gate")!
+    }
 
     /// Default text model. Z.ai GLM 4.7 — strong general reasoning, ~1000 tok/s.
     /// Override with `CLICKY_CEREBRAS_MODEL`.
     static let defaultModel = "zai-glm-4.7"
 
-    /// The Cerebras API key, or nil when unset/blank. nil means the vision gate
-    /// is inert and the app keeps capturing the screen on every query.
-    static var apiKey: String? {
-        let rawValue = ProcessInfo.processInfo.environment["CLICKY_CEREBRAS_API_KEY"]
-            ?? DotEnvConfiguration.value(forKey: "CLICKY_CEREBRAS_API_KEY")
-        let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (trimmed?.isEmpty == false) ? trimmed : nil
-    }
-
-    /// The text model to use, falling back to `defaultModel`.
+    /// The text model to use, falling back to `defaultModel`. Sent in the request
+    /// body and forwarded verbatim by the Worker to Cerebras.
     static var model: String {
         let rawValue = ProcessInfo.processInfo.environment["CLICKY_CEREBRAS_MODEL"]
             ?? DotEnvConfiguration.value(forKey: "CLICKY_CEREBRAS_MODEL")
@@ -47,8 +50,12 @@ enum CerebrasConfiguration {
         return defaultModel
     }
 
-    /// True when an API key is present, so the gate has a text backend to use.
-    static var isConfigured: Bool { apiKey != nil }
+    /// True once we have an install token to authenticate the Worker call. Before
+    /// the first `/register` there's no token, so the gate stays inert and the app
+    /// keeps capturing the screen. (If the Worker has no Cerebras key, `/vision-gate`
+    /// 503s and the classifier still falls back to screen capture — reliability
+    /// over the saved round-trip.)
+    static var isConfigured: Bool { PerchInstallIdentity.currentInstallToken() != nil }
 }
 
 /// Cerebras text-only client: a screen-need classifier and a streaming answerer.
@@ -69,13 +76,22 @@ final class CerebrasClient {
         self.session = URLSession(configuration: config)
     }
 
-    /// Builds a POST request to the chat-completions endpoint with Bearer auth.
-    private func makeRequest(apiKey: String) -> URLRequest {
-        var request = URLRequest(url: CerebrasConfiguration.chatCompletionsURL)
+    /// Builds a POST request to the Worker's `/vision-gate` route. Authenticates
+    /// with the per-install token (never a provider key). `feature` tags the call
+    /// for usage metering: the text-only answer path passes "companion" so it
+    /// counts as a message exactly like the `/chat` path it replaces; the classifier
+    /// call leaves it nil so the routing decision is never metered.
+    private func makeRequest(feature: String? = nil) -> URLRequest {
+        var request = URLRequest(url: CerebrasConfiguration.visionGateURL)
         request.httpMethod = "POST"
         request.timeoutInterval = 60
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let installToken = PerchInstallIdentity.currentInstallToken() {
+            request.setValue(installToken, forHTTPHeaderField: "X-Perch-Install-Token")
+        }
+        if let feature {
+            request.setValue(feature, forHTTPHeaderField: "X-Perch-Feature")
+        }
         return request
     }
 
@@ -115,7 +131,7 @@ final class CerebrasClient {
             return true
         }
 
-        guard let apiKey = CerebrasConfiguration.apiKey else { return true }
+        guard CerebrasConfiguration.isConfigured else { return true }
 
         var messages: [[String: Any]] = [
             ["role": "system", "content": Self.classifierSystemPrompt]
@@ -137,7 +153,7 @@ final class CerebrasClient {
             "messages": messages
         ]
 
-        var request = makeRequest(apiKey: apiKey)
+        var request = makeRequest()
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let (data, response) = try await session.data(for: request)
@@ -181,11 +197,11 @@ final class CerebrasClient {
         maxTokens: Int = 1024,
         onTextChunk: @MainActor @Sendable (String) -> Void
     ) async throws -> (text: String, duration: TimeInterval) {
-        guard let apiKey = CerebrasConfiguration.apiKey else {
+        guard CerebrasConfiguration.isConfigured else {
             throw NSError(
                 domain: "CerebrasClient",
                 code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Cerebras API key not configured"]
+                userInfo: [NSLocalizedDescriptionKey: "Vision gate unavailable (no install token yet)"]
             )
         }
 
@@ -208,7 +224,9 @@ final class CerebrasClient {
             "messages": messages
         ]
 
-        var request = makeRequest(apiKey: apiKey)
+        // The text-only answer replaces a /chat companion turn, so meter it as
+        // "companion" — one message either way, closing the vision-gate cap bypass.
+        var request = makeRequest(feature: "companion")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (byteStream, response) = try await session.bytes(for: request)
