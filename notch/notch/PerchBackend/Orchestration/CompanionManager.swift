@@ -541,6 +541,13 @@ final class CompanionManager: ObservableObject {
         // well before the onboarding demo fires at ~40s into the video.
         _ = claudeAPI
 
+        // Right after the post-onboarding relaunch (when the Screen Recording grant is
+        // finally live), do ONE throwaway direct capture. This surfaces macOS 15/26's
+        // separate "bypass the private window picker" consent immediately and in-context
+        // — the onboarding copy primed the user for it — instead of ambushing them on a
+        // later query. Runs at most once; the result is discarded.
+        maybeRunScreenCaptureDirectAccessWarmup()
+
         // If the user already completed onboarding AND all permissions are
         // still granted, show the cursor overlay immediately. If permissions
         // were revoked (e.g. signing change), don't show the cursor — the
@@ -1558,6 +1565,13 @@ final class CompanionManager: ObservableObject {
                 await speakResponse(spokenText)
             } catch is CancellationError {
                 // User spoke again — response was interrupted
+            } catch let captureError as CompanionScreenCaptureError {
+                // Screen Recording was granted while the app was already running, so
+                // the grant isn't live in this process. Offer a single deterministic
+                // relaunch instead of letting macOS re-prompt on every turn.
+                PerchRunLog.append(run, .error, "screen capture blocked: \(captureError)")
+                print("⚠️ Screen capture blocked: \(captureError)")
+                promptScreenRecordingRelaunchIfNeeded()
             } catch {
                 PerchAnalytics.trackResponseError(error: error.localizedDescription)
                 PerchRunLog.append(run, .error, "response pipeline error (screenshot/claude/tts): \(error)")
@@ -1845,6 +1859,71 @@ final class CompanionManager: ObservableObject {
     /// Shows a hardcoded error message as text at the notch when API credits
     /// run out. This stays silent (no TTS) so it works even when ElevenLabs is
     /// down — the message is surfaced in the on-screen bubble near the cursor.
+    /// Performs a single throwaway direct capture to surface macOS's "bypass the private
+    /// window picker" consent in-context after onboarding. No-op unless a warm-up is
+    /// pending and the classic Screen Recording grant is live in this process.
+    private func maybeRunScreenCaptureDirectAccessWarmup() {
+        guard WindowPositionManager.shouldRunScreenCaptureDirectAccessWarmup() else { return }
+        WindowPositionManager.markScreenCaptureDirectAccessWarmupDone()
+        Task { @MainActor [weak self] in
+            guard self != nil else { return }
+            // A brief settle so the window server / overlays are up before macOS shows
+            // the consent, and the capture attribution is clean.
+            try? await Task.sleep(for: .seconds(1))
+            // Small maxDimension keeps this cheap — we only need SCK to fire the consent.
+            _ = try? await CompanionScreenCaptureUtility.captureAllScreensAsJPEG(maxDimension: 320)
+            PerchRunLog.append(nil, .state, "screen-capture direct-access warm-up fired")
+        }
+    }
+
+    /// Shown at most once per launch so a user who keeps asking doesn't get nagged
+    /// repeatedly. Reset only when we explicitly send them to System Settings, so the
+    /// relaunch offer can come back after they flip the toggle there.
+    private var hasPromptedScreenRecordingRelaunchThisLaunch = false
+
+    /// Surfaces Perch's own one-time relaunch path when Screen Recording was granted
+    /// while the app was already running. macOS only applies that grant to a freshly
+    /// launched process, so a single Quit & Reopen makes it live — far better than the
+    /// raw system prompt re-appearing on every turn.
+    private func promptScreenRecordingRelaunchIfNeeded() {
+        voiceState = .idle
+        scheduleTransientHideIfNeeded()
+
+        guard !hasPromptedScreenRecordingRelaunchThisLaunch else { return }
+        hasPromptedScreenRecordingRelaunchThisLaunch = true
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Relaunch Perch to finish enabling screen access"
+        alert.informativeText = """
+        Perch needs Screen Recording to see your screen. macOS only applies that \
+        permission after a relaunch.
+
+        If you already enabled Perch under System Settings → Privacy & Security → \
+        Screen Recording, just click Quit & Reopen. If not, open System Settings, \
+        turn Perch on, then relaunch.
+        """
+        alert.addButton(withTitle: "Quit & Reopen")
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Not Now")
+
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            // The user is asserting they've granted it. Trust that on the next launch so
+            // the capture path actually tries ScreenCaptureKit (CGPreflight can report a
+            // false negative even after a real grant) instead of looping on this card.
+            WindowPositionManager.markScreenRecordingPermissionConfirmed()
+            ApplicationRelauncher.restart()
+        case .alertSecondButtonReturn:
+            WindowPositionManager.openScreenRecordingSettings()
+            // Let the offer return after they toggle the switch in System Settings.
+            hasPromptedScreenRecordingRelaunchThisLaunch = false
+        default:
+            break
+        }
+    }
+
     private func displayCreditsErrorMessage() {
         let message = "I'm all out of credits. Please DM Farza and tell him to bring me back to life."
         PerchRunLog.append(activeRun, .action, "\(message) (shown as text at notch)")

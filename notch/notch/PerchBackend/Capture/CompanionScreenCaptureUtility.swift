@@ -21,6 +21,24 @@ struct CompanionScreenCapture {
     let screenshotHeightInPixels: Int
 }
 
+enum CompanionScreenCaptureError: LocalizedError {
+    /// Screen Recording isn't usable by the *running* process yet. This is the
+    /// common first-run case: the user granted Screen Recording while Perch was
+    /// already open, but macOS only applies that grant to a freshly launched
+    /// process. Calling ScreenCaptureKit in this state makes macOS fire its raw
+    /// "record this computer's screen" prompt on EVERY capture — even though the
+    /// user already granted it. We throw instead so the caller can offer a single
+    /// deterministic relaunch rather than letting the system prompt loop forever.
+    case screenRecordingPermissionNotLive
+
+    var errorDescription: String? {
+        switch self {
+        case .screenRecordingPermissionNotLive:
+            return "Screen Recording isn't active for the running app yet — relaunch Perch to enable it."
+        }
+    }
+}
+
 @MainActor
 enum CompanionScreenCaptureUtility {
 
@@ -34,6 +52,15 @@ enum CompanionScreenCaptureUtility {
     /// must pass a near-native value — at 1280 a document's body text is
     /// illegible and vision models confabulate plausible values instead.
     static func captureAllScreensAsJPEG(maxDimension: Int = 1280) async throws -> [CompanionScreenCapture] {
+        // Preflight before touching ScreenCaptureKit. If the running process has no
+        // live Screen Recording grant, SCK would surface macOS's raw record-screen
+        // prompt on every single call — the exact "it keeps asking even though I
+        // granted it" loop. The grant only goes live on the next launch, so we bail
+        // with a typed error and let the caller drive a one-time relaunch instead.
+        guard WindowPositionManager.shouldTreatScreenRecordingPermissionAsGrantedForSessionLaunch() else {
+            throw CompanionScreenCaptureError.screenRecordingPermissionNotLive
+        }
+
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
 
         guard !content.displays.isEmpty else {

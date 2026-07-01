@@ -651,6 +651,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showOnboardingWindow(step: OnboardingStep = .welcome) {
+        // Resume an interrupted onboarding (e.g. after the relaunch macOS forces
+        // when you grant Screen Recording / Accessibility) at the step the user
+        // left off, rather than restarting from the welcome screen.
+        let resumedStep = OnboardingProgress.resumeStep(defaultingTo: step)
         if onboardingWindowController == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
@@ -664,12 +668,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.titleVisibility = .hidden
             window.contentView = NSHostingView(
                 rootView: OnboardingView(
-                    step: step,
+                    step: resumedStep,
                     onFinish: {
                         window.orderOut(nil)
 //                        NSApp.setActivationPolicy(.accessory)
                         window.close()
                         NSApp.deactivate()
+
+                        // If the user granted Screen Recording during onboarding, macOS
+                        // only honors it on the next launch. Relaunch once now so their
+                        // first prompt captures the screen silently, instead of hitting
+                        // the relaunch card (or the raw system prompt) on first use.
+                        // Also queue the direct-capture warm-up so the second macOS
+                        // consent ("bypass the private window picker") is surfaced right
+                        // after the relaunch, in-context, rather than on a later query.
+                        if WindowPositionManager.shouldRelaunchAfterOnboardingToActivateScreenRecording() {
+                            WindowPositionManager.noteScreenCaptureDirectAccessWarmupNeeded()
+                            WindowPositionManager.markPostOnboardingScreenRecordingRelaunchConsumed()
+                            ApplicationRelauncher.restart()
+                            return
+                        }
+
                         // Greet the user in the notch now that setup is complete.
                         // closeHello() (HelloAnimation.onFinish) flips this back off
                         // once the animation has played through once.

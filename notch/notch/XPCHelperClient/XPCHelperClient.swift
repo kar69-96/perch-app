@@ -5,7 +5,11 @@ import AsyncXPCConnection
 final class XPCHelperClient: NSObject {
     nonisolated static let shared = XPCHelperClient()
     
-    private let serviceName = "app.perch.notch.NotchXPCHelper"
+    // Derive the XPC service name from the host app's bundle id rather than
+    // hardcoding it, so a build with a different bundle id (e.g. the beta DMG's
+    // `app.perch.notch.beta`) still resolves its own bundled helper. The nested
+    // XPCService's CFBundleIdentifier is always `<app bundle id>.NotchXPCHelper`.
+    private let serviceName = (Bundle.main.bundleIdentifier ?? "app.perch.notch") + ".NotchXPCHelper"
     
     private var remoteService: RemoteXPCService<NotchXPCHelperProtocol>?
     private var connection: NSXPCConnection?

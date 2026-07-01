@@ -7,7 +7,6 @@
 
 import SwiftUI
 import AVFoundation
-import Speech
 import CoreGraphics
 
 // Permission flow follows the "Hear → See → Act" ordering principle from
@@ -22,7 +21,7 @@ import CoreGraphics
 // never starts — macOS shows NO prompt of its own — so without this step a
 // first-time user's hotkeys are silently dead. (Automation is still left out; the
 // system does surface that one in context.)
-enum OnboardingStep {
+enum OnboardingStep: String {
     case welcome
     case emailVerification
     case microphonePermission
@@ -33,6 +32,33 @@ enum OnboardingStep {
     case musicPermission
     case hotkeyTutorial
     case finished
+}
+
+/// Where Perch remembers how far the user got in onboarding. macOS forces a
+/// relaunch after you grant Screen Recording or Accessibility, which throws away
+/// the in-memory `step`; persisting it lets the next launch resume at the same
+/// place instead of restarting from the welcome screen (the "back to the
+/// beginning every time I grant a permission" loop).
+enum OnboardingProgress {
+    static let resumeStepKey = "perch.onboarding.resumeStep"
+
+    /// The step to resume at: the persisted in-progress step if there is one,
+    /// otherwise the caller-provided starting step.
+    static func resumeStep(defaultingTo fallback: OnboardingStep) -> OnboardingStep {
+        guard let savedRawValue = UserDefaults.standard.string(forKey: resumeStepKey),
+              let savedStep = OnboardingStep(rawValue: savedRawValue)
+        else { return fallback }
+        return savedStep
+    }
+
+    /// Records the current step, or clears the marker once onboarding finishes.
+    static func record(_ step: OnboardingStep) {
+        if step == .finished {
+            UserDefaults.standard.removeObject(forKey: resumeStepKey)
+        } else {
+            UserDefaults.standard.set(step.rawValue, forKey: resumeStepKey)
+        }
+    }
 }
 
 private let calendarService = CalendarService()
@@ -64,7 +90,7 @@ struct OnboardingView: View {
                 )
                 .transition(.opacity)
 
-            // MARK: Ears — Microphone + Speech Recognition (core)
+            // MARK: Ears — Microphone (core)
             case .microphonePermission:
                 PermissionRequestView(
                     icon: Image(systemName: "mic.fill"),
@@ -73,7 +99,7 @@ struct OnboardingView: View {
                     privacyNote: "Your mic is on only while you hold the talk shortcut, transcription stays on your device, and nothing is ever linked to your account.",
                     onAllow: {
                         Task {
-                            await requestMicrophoneAndSpeechPermission()
+                            await requestMicrophonePermission()
                             withAnimation(.easeInOut(duration: 0.6)) {
                                 step = .screenRecordingPermission
                             }
@@ -92,7 +118,7 @@ struct OnboardingView: View {
                 PermissionRequestView(
                     icon: Image(systemName: "eye.fill"),
                     title: "Let Perch Take a Screenshot",
-                    description: "Only when you hold ⌃⌥ or ask for help, Perch takes a single screenshot so it can answer questions about what's on your screen. macOS calls this toggle “Screen Recording,” but Perch never records — it grabs one still image, and only when you ask. You may need to relaunch Perch once after granting this.",
+                    description: "Only when you hold ⌃⌥ or ask for help, Perch takes a single screenshot so it can answer questions about what's on your screen. macOS calls this toggle “Screen Recording,” but Perch never records — it grabs one still image, and only when you ask. Perch will relaunch once after you grant this, and macOS will then ask one more time to let Perch see your screen directly — click Allow so you're not asked again later.",
                     privacyNote: "The screenshot is used to answer your question, then discarded — never recorded, never stored, and never linked to your account.",
                     onAllow: {
                         Task {
@@ -205,23 +231,25 @@ struct OnboardingView: View {
             }
         }
         .frame(width: 400, height: 600)
+        .onAppear { OnboardingProgress.record(step) }
+        .onChange(of: step) { _, newStep in
+            // Persist progress so a mid-onboarding relaunch (which macOS forces
+            // after granting Screen Recording / Accessibility) resumes at this
+            // step instead of restarting from the welcome screen.
+            OnboardingProgress.record(newStep)
+        }
     }
 
     // MARK: - Permission Request Logic
 
-    /// Ears: push-to-talk capture (Microphone) plus on-device transcription
-    /// (Speech Recognition). Both are fired back-to-back so they read as one
-    /// "Voice" step, matching how a real push-to-talk interaction flows.
-    func requestMicrophoneAndSpeechPermission() async {
+    /// Ears: push-to-talk capture (Microphone) only. Transcription runs through
+    /// the configured provider (AssemblyAI by default, offline Whisper as the
+    /// fallback) — none of which use Apple's Speech Recognition, so we never ask
+    /// for it here. The legacy Apple Speech provider is an explicit opt-in and
+    /// requests its own permission on demand if a user ever selects it.
+    func requestMicrophonePermission() async {
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
-        }
-        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
-            await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { _ in
-                    continuation.resume()
-                }
-            }
         }
     }
 
@@ -229,6 +257,11 @@ struct OnboardingView: View {
     /// prompt and returns the current status immediately; macOS only honors a
     /// fresh grant after the next launch, which the screen copy calls out.
     func requestScreenRecordingPermission() async {
+        // Remember that the user passed through this step so onboarding can auto-relaunch
+        // once at the end — macOS only applies a fresh Screen Recording grant on the next
+        // launch, and relaunching for them avoids the "still asking after I granted it"
+        // confusion on their very first prompt.
+        WindowPositionManager.noteScreenRecordingRequestedDuringOnboarding()
         await Task.detached {
             _ = CGRequestScreenCaptureAccess()
         }.value

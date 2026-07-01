@@ -14,6 +14,10 @@ struct DailyBriefNewsSection: View {
     let headlines: [DailyBriefHeadline]
     let isLoading: Bool
     let comic: DailyBriefComic?
+    // Called when the reader clicks the comic, asking the parent page to present the
+    // full-size lightbox. The comic itself only occupies a small card, so the expanded
+    // view must be hosted higher up (see `DailyBriefView`) to cover the whole page.
+    var onExpandComic: (DailyBriefComic) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -26,7 +30,7 @@ struct DailyBriefNewsSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let comic {
-                    DailyBriefComicView(comic: comic)
+                    DailyBriefComicView(comic: comic, onExpand: { onExpandComic(comic) })
                 }
             }
         }
@@ -79,6 +83,10 @@ private struct DailyBriefHeadlineRow: View {
 
 private struct DailyBriefComicView: View {
     let comic: DailyBriefComic
+    // Clicking the comic asks the page to open the full-size lightbox.
+    let onExpand: () -> Void
+
+    @State private var isHovering = false
 
     // A fixed panel so the comic occupies the SAME footprint every day, regardless of the
     // strip's native dimensions — the image is fitted + centered inside, so a wide single
@@ -108,9 +116,19 @@ private struct DailyBriefComicView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(DailyBriefStyle.hairline, lineWidth: 1)
+                        // The border brightens on hover to communicate that the card is clickable.
+                        .stroke(isHovering ? DailyBriefStyle.headingInk : DailyBriefStyle.hairline, lineWidth: 1)
                 )
+                // A subtle lift on hover reinforces that the comic opens when clicked.
+                .scaleEffect(isHovering ? 1.02 : 1.0)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
                 .help(comic.altText)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .onHover { hovering in
+                    isHovering = hovering
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .onTapGesture { onExpand() }
         }
     }
 }

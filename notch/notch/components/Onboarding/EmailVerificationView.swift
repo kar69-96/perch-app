@@ -38,7 +38,7 @@ struct EmailVerificationView: View {
                 .font(.title)
                 .fontWeight(.semibold)
 
-            Text("Enter your email so Perch can link this Mac to your account. When you upgrade later, it applies here automatically — no password, no code.")
+            Text("Enter your email to link this Mac to your account.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

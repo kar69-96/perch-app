@@ -30,10 +30,24 @@ struct NotchInlineSettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            hotkeysSection
+            // Right column: hotkeys up top, plan tucked into the space beneath.
+            VStack(alignment: .leading, spacing: 14) {
+                hotkeysSection
+                planSection
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 2)
+    }
+
+    // MARK: Plan (display-only: tier + free-tier message usage)
+
+    private var planSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            InlineSettingsSectionHeader(title: "Plan")
+            PlanStatusRow()
+        }
     }
 
     // MARK: Accent color (the one editable setting)
@@ -75,7 +89,6 @@ struct NotchInlineSettingsView: View {
                 repeatedTimes: 2
             )
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -89,6 +102,47 @@ private struct InlineSettingsSectionHeader: View {
             .font(.system(size: 10, weight: .semibold))
             .kerning(0.8)
             .foregroundColor(.white.opacity(0.45))
+    }
+}
+
+// MARK: - Plan Status (display-only tier + free-tier message usage)
+
+private struct PlanStatusRow: View {
+    // The app-side mirror of the Worker's entitlement (plan + this month's usage).
+    @ObservedObject private var identity = PerchInstallIdentity.shared
+
+    private var isPro: Bool { identity.entitlement.isPro }
+
+    private var companionMessagesUsed: Int {
+        identity.entitlement.usage[PerchFeature.companion.rawValue] ?? 0
+    }
+
+    private var companionMessagesCap: Int {
+        identity.entitlement.cap(for: .companion)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            // Tier pill: accent for Pro, muted for Free.
+            Text(isPro ? "Pro" : "Free")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(isPro ? Color.effectiveAccent : .white.opacity(0.85))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(.white.opacity(0.08))
+                )
+
+            // Free tier shows this month's companion-message usage; Pro is
+            // unlimited, so the count is intentionally omitted. The cap guard
+            // hides the line until the entitlement snapshot has loaded.
+            if !isPro && companionMessagesCap > 0 {
+                Text("\(companionMessagesUsed)/\(companionMessagesCap) messages")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+        }
     }
 }
 

@@ -21,6 +21,13 @@ class WindowPositionManager {
     private static var hasAttemptedAccessibilitySystemPromptDuringCurrentLaunch = false
     private static var hasAttemptedScreenRecordingSystemPromptDuringCurrentLaunch = false
     private static let hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey = "com.learningbuddy.hasPreviouslyConfirmedScreenRecordingPermission"
+    /// Set when the user goes through onboarding's Screen Recording step. macOS only
+    /// applies a Screen Recording grant on the *next* launch, so we use this to drive a
+    /// one-time auto-relaunch when onboarding finishes (see
+    /// `shouldRelaunchAfterOnboardingToActivateScreenRecording`).
+    private static let screenRecordingRequestedDuringOnboardingUserDefaultsKey = "com.learningbuddy.screenRecordingRequestedDuringOnboarding"
+    /// Set once we've performed the post-onboarding auto-relaunch, so we never loop on it.
+    private static let didAutoRelaunchAfterOnboardingForScreenRecordingUserDefaultsKey = "com.learningbuddy.didAutoRelaunchAfterOnboardingForScreenRecording"
 
     /// Returns true when the Mac currently has more than one connected display.
     /// Uses AppKit's screen list, which is available without ScreenCaptureKit's
@@ -104,6 +111,72 @@ class WindowPositionManager {
 
     static func clearPreviouslyConfirmedScreenRecordingPermission() {
         UserDefaults.standard.removeObject(forKey: hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey)
+    }
+
+    /// Records the user's assertion that they've granted Screen Recording (e.g. they
+    /// chose "Quit & Reopen" on Perch's relaunch card). Because
+    /// `CGPreflightScreenCaptureAccess()` can report a false negative even after a real
+    /// grant, this confirmed flag lets the capture path actually try ScreenCaptureKit on
+    /// the next launch instead of blocking forever on the preflight — which is what
+    /// turns the relaunch card into a one-shot step rather than its own loop.
+    static func markScreenRecordingPermissionConfirmed() {
+        UserDefaults.standard.set(true, forKey: hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey)
+    }
+
+    // MARK: Post-onboarding auto-relaunch (so a fresh grant goes live without the user
+    // having to think about it).
+
+    /// Called when onboarding presents its Screen Recording step, so we know a grant may
+    /// be pending activation when onboarding finishes.
+    static func noteScreenRecordingRequestedDuringOnboarding() {
+        UserDefaults.standard.set(true, forKey: screenRecordingRequestedDuringOnboardingUserDefaultsKey)
+    }
+
+    /// True when onboarding asked for Screen Recording, the running process still can't
+    /// see the grant, and we haven't already auto-relaunched for it. Drives a single
+    /// quit-and-reopen right after onboarding so the user's first prompt just works.
+    static func shouldRelaunchAfterOnboardingToActivateScreenRecording() -> Bool {
+        let defaults = UserDefaults.standard
+        let requested = defaults.bool(forKey: screenRecordingRequestedDuringOnboardingUserDefaultsKey)
+        let alreadyRelaunched = defaults.bool(forKey: didAutoRelaunchAfterOnboardingForScreenRecordingUserDefaultsKey)
+        return requested && !alreadyRelaunched && !hasScreenRecordingPermission()
+    }
+
+    /// Marks the post-onboarding auto-relaunch as done so it happens at most once.
+    static func markPostOnboardingScreenRecordingRelaunchConsumed() {
+        UserDefaults.standard.set(true, forKey: didAutoRelaunchAfterOnboardingForScreenRecordingUserDefaultsKey)
+    }
+
+    // MARK: Direct-capture ("bypass the private window picker") warm-up.
+    // macOS 15/26 shows a SECOND, separate consent the first time an app captures the
+    // screen *directly* (via SCScreenshotManager) instead of the system picker. It only
+    // fires once the classic Screen Recording grant is live — i.e. after the
+    // post-onboarding relaunch. We surface it deliberately at startup right after
+    // onboarding (a throwaway capture) so the user meets it in-context, primed by the
+    // onboarding copy, instead of being ambushed on some later query.
+    private static let screenCaptureDirectAccessWarmupNeededUserDefaultsKey = "com.learningbuddy.screenCaptureDirectAccessWarmupNeeded"
+    private static let didScreenCaptureDirectAccessWarmupUserDefaultsKey = "com.learningbuddy.didScreenCaptureDirectAccessWarmup"
+
+    /// Called at onboarding finish (when Screen Recording was requested) so the next
+    /// launch — the one where the grant is finally live — performs the warm-up capture.
+    static func noteScreenCaptureDirectAccessWarmupNeeded() {
+        UserDefaults.standard.set(true, forKey: screenCaptureDirectAccessWarmupNeededUserDefaultsKey)
+    }
+
+    /// True when a warm-up is pending, hasn't run yet, and the classic Screen Recording
+    /// grant is now live in this process (so the direct-access prompt can actually fire).
+    static func shouldRunScreenCaptureDirectAccessWarmup() -> Bool {
+        let defaults = UserDefaults.standard
+        let needed = defaults.bool(forKey: screenCaptureDirectAccessWarmupNeededUserDefaultsKey)
+        let alreadyDone = defaults.bool(forKey: didScreenCaptureDirectAccessWarmupUserDefaultsKey)
+        return needed && !alreadyDone && CGPreflightScreenCaptureAccess()
+    }
+
+    /// Marks the direct-access warm-up as done so it runs at most once.
+    static func markScreenCaptureDirectAccessWarmupDone() {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: didScreenCaptureDirectAccessWarmupUserDefaultsKey)
+        defaults.removeObject(forKey: screenCaptureDirectAccessWarmupNeededUserDefaultsKey)
     }
 
     /// Prompts the system dialog for Screen Recording permission.
