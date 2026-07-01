@@ -32,26 +32,28 @@ struct NotchInlineSettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Right column: hotkeys up top, plan tucked into the space beneath.
-            VStack(alignment: .leading, spacing: 14) {
+            // Right column: hotkeys up top, a greyish hairline divider, then the
+            // plan tucked into the space beneath.
+            VStack(alignment: .leading, spacing: 10) {
                 hotkeysSection
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(width: 200, height: 1)
+
                 planSection
             }
             .fixedSize(horizontal: true, vertical: false)
+            .offset(y: -6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 2)
     }
 
-    // MARK: Plan (tier + free-tier usage + upgrade CTA)
-    // Keeps the section header so the block lines up with the panel's other
-    // sections (Accent color / Integrations / Hotkeys).
+    // MARK: Plan (tier label over usage, with the upgrade CTA alongside)
 
     private var planSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            InlineSettingsSectionHeader(title: identity.entitlement.isPro ? "Pro" : "Free Tier")
-            PlanStatusRow()
-        }
+        PlanStatusRow()
     }
 
     // MARK: Accent color (the one editable setting)
@@ -127,32 +129,27 @@ private struct PlanStatusRow: View {
     }
 
     var body: some View {
-        // Single row (like the hotkey rows) so the block stays within the notch's
-        // fixed height: tier pill, then free-tier usage, then the upgrade chip.
+        // Upgrade chip on the left; the tier label sits directly above this
+        // month's usage count on the right. Kept compact so the block fits the
+        // notch's fixed height.
         HStack(alignment: .center, spacing: 10) {
-            // Tier pill: accent for Pro, muted for Free.
-            Text(isPro ? "Pro" : "Free")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(isPro ? Color.effectiveAccent : .white.opacity(0.85))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(.white.opacity(0.08))
-                )
-
-            // Free tier shows this month's companion-message usage; Pro is
-            // unlimited, so the count is intentionally omitted. The cap guard
-            // hides the line until the entitlement snapshot has loaded.
-            if !isPro && companionMessagesCap > 0 {
-                Text("\(companionMessagesUsed)/\(companionMessagesCap) messages")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.45))
-            }
-
-            // Free tier gets an upgrade CTA, inline to keep the row height compact.
             if !isPro {
                 InlineUpgradeButton(isStarting: isStartingCheckout, action: startCheckout)
+            }
+
+            VStack(alignment: .center, spacing: 2) {
+                Text(isPro ? "Pro" : "Free Tier")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(isPro ? Color.effectiveAccent : .white.opacity(0.85))
+
+                // Free tier shows this month's companion-message usage; Pro is
+                // unlimited, so the count is intentionally omitted. The cap guard
+                // hides the line until the entitlement snapshot has loaded.
+                if !isPro && companionMessagesCap > 0 {
+                    Text("\(companionMessagesUsed)/\(companionMessagesCap) messages")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.45))
+                }
             }
         }
         .task {
