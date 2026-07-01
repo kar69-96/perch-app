@@ -29,6 +29,9 @@ final class PerchInstallIdentity: ObservableObject {
     @Published private(set) var installId: String
     /// The email linked at onboarding, if any.
     @Published private(set) var email: String?
+    /// Whether the linked email has been proven via the onboarding OTP flow.
+    /// Persisted so a verified user is never re-challenged on relaunch.
+    @Published private(set) var emailVerified: Bool
     /// The owner's server-side kill switch from the last /register response.
     /// When false, trace collection is disabled for this install regardless of
     /// the local opt-in toggle. Mirrored to a cross-actor cache for the uploaders.
@@ -52,6 +55,7 @@ final class PerchInstallIdentity: ObservableObject {
         let persisted = Self.loadOrMintIdentity()
         installId = persisted.installId
         email = persisted.email
+        emailVerified = persisted.emailVerified ?? false
         serverTracingEnabled = persisted.tracingEnabled
         installToken = persisted.installToken
         isRegistered = persisted.installToken != nil
@@ -171,6 +175,107 @@ final class PerchInstallIdentity: ObservableObject {
         }
     }
 
+    // MARK: - Email verification (onboarding OTP)
+
+    /// The outcome of asking the Worker to send a verification code.
+    enum EmailVerificationSendResult {
+        case sent
+        /// A user-presentable reason the code could not be sent.
+        case failed(String)
+    }
+
+    /// The outcome of checking a verification code.
+    enum EmailVerificationCheckResult {
+        case verified
+        /// The code did not match.
+        case incorrect
+        /// The code expired or was never issued — the user should request a new one.
+        case expired
+        /// A transport/server error; the message is user-presentable.
+        case failed(String)
+    }
+
+    /// Asks the Worker (which generates the code and sends the email) to email a
+    /// 6-digit code to `email`. Does not mutate identity state — the email is only recorded once a
+    /// code is confirmed. The install token is attached when present so the
+    /// request is attributed and rate-limited per install.
+    func sendEmailVerificationCode(to email: String) async -> EmailVerificationSendResult {
+        guard let url = URL(string: "\(Self.workerBaseURL)/account/verify-request") else {
+            return .failed("Verification is unavailable right now.")
+        }
+        var request = authorizedRequest(url: url, method: "POST")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": email])
+
+        do {
+            let (data, response) = try await Self.registrationSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failed("Verification is unavailable right now.")
+            }
+            if (200...299).contains(httpResponse.statusCode) {
+                return .sent
+            }
+            perchDebugLog("email-verify: send failed (status \(httpResponse.statusCode))")
+            return .failed(Self.errorMessage(from: data, fallback: "Couldn't send the code. Please try again."))
+        } catch {
+            perchDebugLog("email-verify: send error \(error.localizedDescription)")
+            return .failed("Couldn't reach the server. Check your connection and try again.")
+        }
+    }
+
+    /// Checks `code` for `email` with the Worker. On success, records the email as
+    /// linked + verified on this install (and best-effort links it server-side via
+    /// /register), then persists so the user is never re-challenged.
+    func confirmEmailVerificationCode(email: String, code: String) async -> EmailVerificationCheckResult {
+        guard let url = URL(string: "\(Self.workerBaseURL)/account/verify-confirm") else {
+            return .failed("Verification is unavailable right now.")
+        }
+        var request = authorizedRequest(url: url, method: "POST")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "email": email,
+            "code": code,
+            "installId": installId,
+        ])
+
+        do {
+            let (data, response) = try await Self.registrationSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                perchDebugLog("email-verify: confirm failed (non-2xx or unparseable)")
+                return .failed(Self.errorMessage(from: data, fallback: "Couldn't verify the code. Please try again."))
+            }
+
+            if (json["verified"] as? Bool) == true {
+                if !email.isEmpty { self.email = email }
+                emailVerified = true
+                persist()
+                // Best-effort: link the (now verified) email to this install on the
+                // Worker so the account is labeled and the install token refreshes.
+                await register(emailToLink: email)
+                return .verified
+            }
+
+            // verified:false — distinguish an expired code (request a new one) from
+            // a simply-wrong one so the UI can guide the user correctly.
+            let reason = json["reason"] as? String
+            return reason == "expired" ? .expired : .incorrect
+        } catch {
+            perchDebugLog("email-verify: confirm error \(error.localizedDescription)")
+            return .failed("Couldn't reach the server. Check your connection and try again.")
+        }
+    }
+
+    /// Pulls a user-presentable message out of a Worker JSON error body
+    /// (`{"error": "…"}`), falling back to a generic line.
+    private static func errorMessage(from data: Data?, fallback: String) -> String {
+        guard let data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = json["error"] as? String, !message.isEmpty else {
+            return fallback
+        }
+        return message
+    }
+
     /// Builds a request carrying the install token (the Worker's auth principal).
     private func authorizedRequest(url: URL, method: String) -> URLRequest {
         var request = URLRequest(url: url)
@@ -196,6 +301,9 @@ final class PerchInstallIdentity: ObservableObject {
         let installId: String
         var installToken: String?
         var email: String?
+        // Optional for forward/backward compatibility with identity files written
+        // before the onboarding email-OTP flow existed (decode → treat as false).
+        var emailVerified: Bool?
         var tracingEnabled: Bool
         // Cached so the app remembers a paid plan offline. Optional for forward/
         // backward compatibility with identity files written before this field.
@@ -225,6 +333,7 @@ final class PerchInstallIdentity: ObservableObject {
             installId: UUID().uuidString.lowercased(),
             installToken: nil,
             email: nil,
+            emailVerified: false,
             tracingEnabled: true,
             entitlement: nil
         )
@@ -237,6 +346,7 @@ final class PerchInstallIdentity: ObservableObject {
             installId: installId,
             installToken: installToken,
             email: email,
+            emailVerified: emailVerified,
             tracingEnabled: serverTracingEnabled,
             entitlement: entitlement
         ))

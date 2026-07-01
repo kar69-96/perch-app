@@ -2,28 +2,29 @@
 //  EmailVerificationView.swift
 //  notch
 //
-//  Onboarding account step: capture the user's email. No verification code is
-//  sent — the email is recorded against this install as a label, and ownership is
-//  proven later at upgrade time by Stripe (the payer controls the email + card).
-//  The free tier (25 messages) works with or without an email, so this step is
-//  skippable; entering it just pre-fills checkout and labels the account when the
-//  user upgrades.
+//  Onboarding account step, part 1 of 2: capture the user's email and send a
+//  6-digit verification code to it (via PerchInstallIdentity → the Worker, which
+//  generates the code and emails it). This step is MANDATORY — onboarding cannot
+//  proceed until an email is verified — so there is no "skip". On a sent code,
+//  onboarding advances to `OTPVerificationView` (part 2) to check the code.
 //
-//  Talks only to PerchInstallIdentity (which calls the Worker /register); this
-//  view holds no network or account logic of its own.
+//  This view holds no network or account logic of its own; it only calls
+//  PerchInstallIdentity.
 //
 
 import SwiftUI
 
 struct EmailVerificationView: View {
-    /// Called when the user has submitted their email, or chosen to skip, and
-    /// onboarding should advance to the next step.
-    let onContinue: () -> Void
+    /// Called once a code has been sent, carrying the normalized email the code
+    /// went to. Onboarding advances to the code-entry step with this address.
+    let onCodeSent: (String) -> Void
 
     @ObservedObject private var identity = PerchInstallIdentity.shared
 
     @State private var emailAddress: String = ""
     @State private var isSubmitting: Bool = false
+    @State private var errorMessage: String?
+    @FocusState private var isEmailFocused: Bool
 
     var body: some View {
         VStack(spacing: 24) {
@@ -34,11 +35,11 @@ struct EmailVerificationView: View {
                 .foregroundColor(.effectiveAccent)
                 .padding(.top, 36)
 
-            Text("Link your account")
+            Text("Verify your email")
                 .font(.title)
                 .fontWeight(.semibold)
 
-            Text("Enter your email to link this Mac to your account.")
+            Text("Perch needs a verified email to set up your account. Enter it and we'll send you a 6-digit code.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -49,18 +50,25 @@ struct EmailVerificationView: View {
                 .textContentType(.emailAddress)
                 .disableAutocorrection(true)
                 .frame(maxWidth: 260)
-                .onSubmit(submit)
+                .focused($isEmailFocused)
+                .onSubmit(sendCode)
+                .onChange(of: emailAddress) { _, _ in errorMessage = nil }
 
-            HStack(spacing: 12) {
-                Button("Skip for now") { onContinue() }
-                    .buttonStyle(.bordered)
-                Button(action: submit) {
-                    Text(isSubmitting ? "Saving…" : "Continue")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSubmitting || !isValidEmail(emailAddress))
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
-            .padding(.top, 8)
+
+            Button(action: sendCode) {
+                Text(isSubmitting ? "Sending…" : "Send code")
+                    .frame(maxWidth: 260)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isSubmitting || !isValidEmail(emailAddress))
+            .padding(.top, 4)
 
             Spacer()
         }
@@ -69,20 +77,27 @@ struct EmailVerificationView: View {
             VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
                 .ignoresSafeArea()
         )
+        .onAppear { isEmailFocused = true }
     }
 
     // MARK: - Actions
 
-    private func submit() {
-        guard isValidEmail(emailAddress), !isSubmitting else { return }
+    private func sendCode() {
+        let normalizedEmail = emailAddress
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard isValidEmail(normalizedEmail), !isSubmitting else { return }
         isSubmitting = true
+        errorMessage = nil
         Task {
-            // Records the email on this install and refreshes the install token /
-            // entitlement. Best-effort: even if the network call fails, onboarding
-            // proceeds (the free tier works regardless).
-            await identity.register(emailToLink: emailAddress)
+            let result = await identity.sendEmailVerificationCode(to: normalizedEmail)
             isSubmitting = false
-            onContinue()
+            switch result {
+            case .sent:
+                onCodeSent(normalizedEmail)
+            case .failed(let message):
+                errorMessage = message
+            }
         }
     }
 
@@ -93,6 +108,6 @@ struct EmailVerificationView: View {
 }
 
 #Preview {
-    EmailVerificationView(onContinue: { })
+    EmailVerificationView(onCodeSent: { _ in })
         .frame(width: 400, height: 600)
 }

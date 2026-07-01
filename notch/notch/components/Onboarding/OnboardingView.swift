@@ -24,6 +24,7 @@ import CoreGraphics
 enum OnboardingStep: String {
     case welcome
     case emailVerification
+    case emailCodeVerification
     case microphonePermission
     case screenRecordingPermission
     case accessibilityPermission
@@ -65,6 +66,10 @@ private let calendarService = CalendarService()
 
 struct OnboardingView: View {
     @State var step: OnboardingStep = .welcome
+    /// The email a code was sent to in `.emailVerification`, carried into the
+    /// `.emailCodeVerification` step so the code is checked against the same
+    /// address it was sent to.
+    @State private var pendingVerificationEmail: String = ""
     let onFinish: () -> Void
     let onOpenSettings: () -> Void
 
@@ -79,12 +84,30 @@ struct OnboardingView: View {
                 }
                 .transition(.opacity)
 
-            // MARK: Account — link this Mac by verifying an email (skippable)
+            // MARK: Account — verify an email (mandatory). Part 1: enter email + send code.
             case .emailVerification:
                 EmailVerificationView(
-                    onContinue: {
+                    onCodeSent: { normalizedEmail in
+                        pendingVerificationEmail = normalizedEmail
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            step = .emailCodeVerification
+                        }
+                    }
+                )
+                .transition(.opacity)
+
+            // MARK: Account — verify an email (mandatory). Part 2: enter the 6-digit code.
+            case .emailCodeVerification:
+                OTPVerificationView(
+                    email: pendingVerificationEmail,
+                    onVerified: {
                         withAnimation(.easeInOut(duration: 0.6)) {
                             step = .microphonePermission
+                        }
+                    },
+                    onChangeEmail: {
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            step = .emailVerification
                         }
                     }
                 )
