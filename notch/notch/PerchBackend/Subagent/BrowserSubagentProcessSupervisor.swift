@@ -75,22 +75,37 @@ final class BrowserSubagentProcessSupervisor {
             return socketPath
         }
 
-        // Prefer an explicit Info.plist override; otherwise derive the sidecar
-        // directory from the resolved repo root (`<repo>/browser-subagent`). The
-        // derivation keeps machine-specific absolute paths out of the committed
-        // bundle, so any clone works without editing Info.plist.
-        let sidecarDirectory: String
+        // Resolve the sidecar directory from an ordered list of candidates, using
+        // the first that actually contains run.sh. This makes every build flavor
+        // work without code changes — important now that the sidecar lives in the
+        // *closed backend* repo, not beside the app:
+        //   1. an explicit Info.plist BrowserSubagentPath — dev builds point this at
+        //      the in-repo (monorepo) or sibling-worktree (post-split) browser-subagent/,
+        //   2. <repoRoot>/browser-subagent — a plain source/monorepo checkout,
+        //   3. the copy bundled read-only in Contents/Resources — the signed release
+        //      binary, into which package-release.sh copies the sidecar from the backend.
+        // Trying candidates by run.sh presence (rather than committing to the first
+        // non-nil path) means a stale/empty override — e.g. the public app repo, which
+        // ships no sidecar — cleanly falls through instead of hard-failing.
+        var candidateSidecarDirectories: [String] = []
         if let configuredSidecarDirectory = AppBundleConfiguration.stringValue(forKey: Self.sidecarPathInfoKey) {
-            sidecarDirectory = configuredSidecarDirectory
-        } else if let repoRootURL = PerchSupportPaths.repoRootURL {
-            sidecarDirectory = repoRootURL.appendingPathComponent("browser-subagent", isDirectory: true).path
-        } else {
-            throw SupervisorError.sidecarPathMissing
+            candidateSidecarDirectories.append(configuredSidecarDirectory)
+        }
+        if let repoRootURL = PerchSupportPaths.repoRootURL {
+            candidateSidecarDirectories.append(
+                repoRootURL.appendingPathComponent("browser-subagent", isDirectory: true).path)
+        }
+        if let bundledResourceURL = Bundle.main.resourceURL {
+            candidateSidecarDirectories.append(
+                bundledResourceURL.appendingPathComponent("browser-subagent", isDirectory: true).path)
         }
 
-        let runScriptPath = (sidecarDirectory as NSString).appendingPathComponent("run.sh")
-        guard FileManager.default.fileExists(atPath: runScriptPath) else {
-            throw SupervisorError.runScriptMissing(runScriptPath)
+        func directoryContainsRunScript(_ directory: String) -> Bool {
+            FileManager.default.fileExists(
+                atPath: (directory as NSString).appendingPathComponent("run.sh"))
+        }
+        guard let sidecarDirectory = candidateSidecarDirectories.first(where: directoryContainsRunScript) else {
+            throw SupervisorError.sidecarPathMissing
         }
 
         // A leftover socket file from a sidecar that has since died would make
@@ -141,6 +156,17 @@ final class BrowserSubagentProcessSupervisor {
             // the Worker keeps the real Exa key server-side (never in the binary).
             environment["EXA_BASE_URL"] = "\(Self.workerBaseURL)/exa"
             environment["EXA_API_KEY"] = installToken
+        }
+
+        // When the sidecar runs from the read-only, code-signed app bundle (the
+        // release/beta build, where package-release.sh copied it into Resources),
+        // run.sh CANNOT create its .venv / download Chromium next to the source —
+        // writing into the bundle would fail and would break the code signature.
+        // Point run.sh's mutable state at the writable support dir instead; run.sh
+        // reads PERCH_SIDECAR_STATE_DIR. A plain source/dev checkout leaves this
+        // unset and keeps its .venv in-place, exactly as before.
+        if sidecarDirectory.hasPrefix(Bundle.main.bundlePath) {
+            environment["PERCH_SIDECAR_STATE_DIR"] = PerchSupportPaths.directory("sidecar").path
         }
         process.environment = environment
 
