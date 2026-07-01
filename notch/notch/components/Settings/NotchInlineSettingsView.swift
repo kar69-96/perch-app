@@ -21,6 +21,8 @@ import SwiftUI
 
 struct NotchInlineSettingsView: View {
     @EnvironmentObject var companionManager: CompanionManager
+    // Drives the tier-aware section header ("Free Tier" / "Pro").
+    @ObservedObject private var identity = PerchInstallIdentity.shared
 
     var body: some View {
         HStack(alignment: .top, spacing: 22) {
@@ -41,11 +43,13 @@ struct NotchInlineSettingsView: View {
         .padding(.top, 2)
     }
 
-    // MARK: Plan (display-only: tier + free-tier message usage)
+    // MARK: Plan (tier + free-tier usage + upgrade CTA)
+    // Keeps the section header so the block lines up with the panel's other
+    // sections (Accent color / Integrations / Hotkeys).
 
     private var planSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            InlineSettingsSectionHeader(title: "Plan")
+            InlineSettingsSectionHeader(title: identity.entitlement.isPro ? "Pro" : "Free Tier")
             PlanStatusRow()
         }
     }
@@ -105,11 +109,12 @@ private struct InlineSettingsSectionHeader: View {
     }
 }
 
-// MARK: - Plan Status (display-only tier + free-tier message usage)
+// MARK: - Plan Status (tier + free-tier usage + upgrade CTA)
 
 private struct PlanStatusRow: View {
     // The app-side mirror of the Worker's entitlement (plan + this month's usage).
     @ObservedObject private var identity = PerchInstallIdentity.shared
+    @State private var isStartingCheckout = false
 
     private var isPro: Bool { identity.entitlement.isPro }
 
@@ -122,6 +127,8 @@ private struct PlanStatusRow: View {
     }
 
     var body: some View {
+        // Single row (like the hotkey rows) so the block stays within the notch's
+        // fixed height: tier pill, then free-tier usage, then the upgrade chip.
         HStack(alignment: .center, spacing: 10) {
             // Tier pill: accent for Pro, muted for Free.
             Text(isPro ? "Pro" : "Free")
@@ -142,7 +149,65 @@ private struct PlanStatusRow: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.45))
             }
+
+            // Free tier gets an upgrade CTA, inline to keep the row height compact.
+            if !isPro {
+                InlineUpgradeButton(isStarting: isStartingCheckout, action: startCheckout)
+            }
         }
+        .task {
+            // Reflect any upgrade made on another device / the website.
+            await identity.refreshEntitlement()
+        }
+    }
+
+    private func startCheckout() {
+        guard !isStartingCheckout else { return }
+        isStartingCheckout = true
+        Task {
+            _ = await PerchBilling.startUpgradeCheckout()
+            isStartingCheckout = false
+        }
+    }
+}
+
+// MARK: - Upgrade CTA
+// A restrained, accent-tinted chip that reads as tappable without shouting —
+// matched to the panel's translucent-pill language (same 7pt radius as the tier
+// pill), not a saturated fill.
+
+private struct InlineUpgradeButton: View {
+    let isStarting: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(isStarting ? "Opening checkout…" : "Upgrade to Pro")
+                    .font(.system(size: 12, weight: .semibold))
+                if !isStarting {
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10, weight: .bold))
+                }
+            }
+            .foregroundColor(.effectiveAccent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.effectiveAccent.opacity(isHovering ? 0.20 : 0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.effectiveAccent.opacity(0.40), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isStarting)
+        .onHover { isHovering = $0 }
+        .help("$20/mo — unlimited messages, voice or text")
     }
 }
 

@@ -1718,86 +1718,16 @@ struct AccountSettings: View {
     private var companionCap: Int {
         identity.entitlement.cap(for: .companion)
     }
+    private var companionRemaining: Int {
+        max(companionCap - companionUsed, 0)
+    }
 
     var body: some View {
         Form {
-            Section {
-                HStack {
-                    Text("Plan")
-                    Spacer()
-                    Text(identity.entitlement.isPro ? "Pro" : "Free")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(identity.entitlement.isPro ? Color.effectiveAccent : .secondary)
-                }
-                if let email = identity.email, !email.isEmpty {
-                    HStack {
-                        Text("Email")
-                        Spacer()
-                        Text(email).foregroundStyle(.secondary)
-                    }
-                }
-            } header: {
-                Text("Account")
-            }
-
-            Section {
-                if identity.entitlement.isPro {
-                    HStack {
-                        Text("Messages")
-                        Spacer()
-                        Text("Unlimited").foregroundStyle(.secondary)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Messages this month")
-                            Spacer()
-                            Text("\(companionUsed) of \(companionCap)")
-                                .foregroundStyle(companionUsed >= companionCap ? .red : .secondary)
-                        }
-                        ProgressView(
-                            value: Double(min(companionUsed, companionCap)),
-                            total: Double(max(companionCap, 1))
-                        )
-                        .tint(.effectiveAccent)
-                    }
-                    .padding(.vertical, 2)
-                }
-            } header: {
-                Text("Usage")
-            } footer: {
-                if !identity.entitlement.isPro {
-                    Text("Free includes \(companionCap) messages a month — voice or text. Upgrade for unlimited.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if !identity.entitlement.isPro {
-                Section {
-                    Button(action: startCheckout) {
-                        HStack {
-                            Text(isStartingCheckout ? "Opening checkout…" : "Upgrade to Pro — $20/mo")
-                            Spacer()
-                            if !isStartingCheckout {
-                                Image(systemName: "arrow.up.right")
-                            }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(isStartingCheckout)
-
-                    if let checkoutMessage {
-                        Text(checkoutMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } footer: {
-                    Text("Checkout opens in your browser. Enter your email there and Pro applies to this Mac automatically.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            if identity.entitlement.isPro {
+                proSections
+            } else {
+                freeSections
             }
         }
         .accentColor(.effectiveAccent)
@@ -1805,6 +1735,118 @@ struct AccountSettings: View {
         .task {
             // Reflect any upgrade made on another device / the website.
             await identity.refreshEntitlement()
+        }
+    }
+
+    // MARK: - Pro
+
+    @ViewBuilder
+    private var proSections: some View {
+        Section {
+            HStack {
+                Text("Plan")
+                Spacer()
+                Text("Pro")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.effectiveAccent)
+            }
+            if let email = identity.email, !email.isEmpty {
+                HStack {
+                    Text("Email")
+                    Spacer()
+                    Text(email).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Account")
+        }
+
+        Section {
+            HStack {
+                Text("Messages")
+                Spacer()
+                Text("Unlimited").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Usage")
+        }
+    }
+
+    // MARK: - Free
+    // No "Plan" header — for a free account the remaining message count is the
+    // story, followed by a single prominent upgrade call to action.
+
+    @ViewBuilder
+    private var freeSections: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(companionRemaining)")
+                        .font(.system(size: 34, weight: .semibold, design: .rounded))
+                        .foregroundStyle(companionRemaining == 0 ? Color.red : .primary)
+                        .contentTransition(.numericText())
+                    Text(companionRemaining == 1 ? "message left" : "messages left")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(
+                    value: Double(min(companionUsed, companionCap)),
+                    total: Double(max(companionCap, 1))
+                )
+                .tint(companionRemaining == 0 ? .red : .effectiveAccent)
+                Text("\(companionUsed) of \(companionCap) used this month · resets monthly · voice or text")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+
+            if let email = identity.email, !email.isEmpty {
+                HStack {
+                    Text("Email")
+                    Spacer()
+                    Text(email).foregroundStyle(.secondary)
+                }
+            }
+        }
+
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Perch Pro")
+                        .font(.headline)
+                    Text("Unlimited messages — voice or text, no monthly cap.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button(action: startCheckout) {
+                    HStack(spacing: 6) {
+                        Spacer()
+                        if isStartingCheckout {
+                            Text("Opening checkout…")
+                        } else {
+                            Text("Upgrade to Pro — $20/mo").fontWeight(.semibold)
+                            Image(systemName: "arrow.up.right")
+                        }
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isStartingCheckout)
+
+                if let checkoutMessage {
+                    Text(checkoutMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.vertical, 6)
+        } footer: {
+            Text("Checkout opens in your browser. Enter your email there and Pro applies to this Mac automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
