@@ -74,7 +74,9 @@ final class ActiveIntegrationsStore: ObservableObject {
                 case .composio:
                     return manifestState.composioAvailable
                 case .native:
-                    return true
+                    // Native apps (Word/Excel/Numbers) are no longer surfaced in the
+                    // integrations strip — it lists Composio services only.
+                    return false
                 }
             }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
@@ -88,7 +90,8 @@ final class ActiveIntegrationsStore: ObservableObject {
     func refresh() {
         let manifestState = manifestReader.currentState()
         connectedIntegrations = catalog.entries.filter {
-            isConnected($0, manifestState: manifestState)
+            // Composio services only — native apps are excluded from the strip.
+            $0.kind == .composio && isConnected($0, manifestState: manifestState)
         }
     }
 

@@ -176,14 +176,24 @@ private struct AddIntegrationPickerPopover: View {
     @State private var integrationSearchText = ""
     @FocusState private var isSearchFieldFocused: Bool
 
-    private var filteredConnectableIntegrations: [ServiceCatalogEntry] {
+    /// Every Composio service — connected and not-yet-connected — sorted by name,
+    /// so the picker doubles as the connection-status list.
+    private var allIntegrations: [ServiceCatalogEntry] {
+        (store.connectedIntegrations + store.connectableIntegrations)
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private var filteredIntegrations: [ServiceCatalogEntry] {
         let trimmedSearchText = integrationSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let connectable = store.connectableIntegrations
-        guard !trimmedSearchText.isEmpty else { return connectable }
-        return connectable.filter { entry in
+        guard !trimmedSearchText.isEmpty else { return allIntegrations }
+        return allIntegrations.filter { entry in
             entry.displayName.localizedCaseInsensitiveContains(trimmedSearchText)
                 || entry.toolkitSlug.localizedCaseInsensitiveContains(trimmedSearchText)
         }
+    }
+
+    private func isConnected(_ entry: ServiceCatalogEntry) -> Bool {
+        store.connectedIntegrations.contains { $0.toolkitSlug == entry.toolkitSlug }
     }
 
     var body: some View {
@@ -207,6 +217,15 @@ private struct AddIntegrationPickerPopover: View {
                     isSearchFieldFocused = true
                 }
         }
+        // The popover renders in its own window OUTSIDE the notch's hover-tracking
+        // area, so moving the mouse into it would otherwise trip the notch's
+        // mouse-exit auto-close and tear the popover down. Hold the notch open
+        // while the picker is presented (the same escape hatch the close paths
+        // already honor), and release it when the picker dismisses.
+        .onChange(of: isPopoverPresented) { _, presented in
+            SharingStateManager.shared.preventNotchClose = presented
+        }
+        .onDisappear { SharingStateManager.shared.preventNotchClose = false }
     }
 
     private var pickerContent: some View {
@@ -233,14 +252,14 @@ private struct AddIntegrationPickerPopover: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if !store.composioAvailable && store.connectableIntegrations.isEmpty {
+                    if !store.composioAvailable && allIntegrations.isEmpty {
                         pickerEmptyRow("Composio not configured")
-                    } else if store.connectableIntegrations.isEmpty {
-                        pickerEmptyRow("Everything's connected")
-                    } else if filteredConnectableIntegrations.isEmpty {
+                    } else if allIntegrations.isEmpty {
+                        pickerEmptyRow("No integrations available")
+                    } else if filteredIntegrations.isEmpty {
                         pickerEmptyRow("No matches")
                     } else {
-                        ForEach(filteredConnectableIntegrations, id: \.toolkitSlug) { entry in
+                        ForEach(filteredIntegrations, id: \.toolkitSlug) { entry in
                             pickerRow(for: entry)
                         }
                     }
@@ -261,39 +280,66 @@ private struct AddIntegrationPickerPopover: View {
             .padding(.vertical, 6)
     }
 
+    @ViewBuilder
     private func pickerRow(for entry: ServiceCatalogEntry) -> some View {
-        Button(action: {
-            store.connect(entry)
-            isPopoverPresented = false
-        }) {
-            HStack(spacing: 8) {
-                IntegrationIcon(entry: entry)
-                    .frame(width: 16, height: 16)
-
-                Text(entry.displayName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-
-                if store.isConnecting(entry) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
+        if isConnected(entry) {
+            // Already connected — a non-interactive status row (no disconnect).
+            pickerRowChrome(for: entry) {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Connected")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.green)
+            }
+        } else {
+            // Not connected — the whole row is a Connect button. The popover stays
+            // open so the row can flip to "Connected" once the flow completes.
+            Button(action: { store.connect(entry) }) {
+                pickerRowChrome(for: entry) {
+                    if store.isConnecting(entry) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.7)
+                    } else {
+                        Text("Connect")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Color.effectiveAccent)
+                    }
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.clear)
-            )
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .pointerCursor(isEnabled: !store.isConnecting(entry))
+            .disabled(store.isConnecting(entry))
         }
-        .buttonStyle(.plain)
-        .pointerCursor(isEnabled: !store.isConnecting(entry))
-        .disabled(store.isConnecting(entry))
+    }
+
+    /// Shared row chrome: icon + name on the left, a trailing status accessory.
+    private func pickerRowChrome<Accessory: View>(
+        for entry: ServiceCatalogEntry,
+        @ViewBuilder accessory: () -> Accessory
+    ) -> some View {
+        HStack(spacing: 8) {
+            IntegrationIcon(entry: entry)
+                .frame(width: 16, height: 16)
+
+            Text(entry.displayName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            accessory()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.clear)
+        )
+        .contentShape(Rectangle())
     }
 }
 
