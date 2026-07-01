@@ -25,7 +25,7 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var voiceState: CompanionVoiceState = .idle {
         didSet {
             updateTTSMetering(previousState: oldValue)
-            updateMusicDucking(previousState: oldValue)
+            updateNowPlayingPause(previousState: oldValue)
         }
     }
     @Published private(set) var lastTranscript: String?
@@ -133,25 +133,25 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Lowers the music app's volume while Perch is mid-exchange so Perch (and
-    /// the user) can be heard over it, then restores it. Driven by `updateMusicDucking`.
-    private let musicDuckingController = MusicDuckingController()
+    /// Pauses the now-playing media while Perch is mid-exchange so it doesn't
+    /// compete with Perch's reply, then resumes it. Driven by `updateNowPlayingPause`.
+    private let nowPlayingPauseController = NowPlayingPauseController()
 
-    /// Ducks the user's music while Perch is mid-exchange — whether the user is
-    /// talking (`.listening`), Perch is thinking (`.processing`), or Perch is
-    /// speaking (`.responding`) — and restores it once Perch returns to `.idle`.
-    /// Treating the whole non-idle span as one exchange keeps the music quiet
-    /// across the brief `.listening → .processing → .responding` transitions
-    /// instead of jumping back up between them. Called from `voiceState.didSet`,
-    /// mirroring `updateTTSMetering`.
-    private func updateMusicDucking(previousState: CompanionVoiceState) {
+    /// Pauses the user's now-playing media while Perch is mid-exchange — whether
+    /// the user is talking (`.listening`), Perch is thinking (`.processing`), or
+    /// Perch is speaking (`.responding`) — and resumes it once Perch returns to
+    /// `.idle`. Treating the whole non-idle span as one exchange keeps the media
+    /// paused across the brief `.listening → .processing → .responding`
+    /// transitions instead of resuming between them. Called from
+    /// `voiceState.didSet`, mirroring `updateTTSMetering`.
+    private func updateNowPlayingPause(previousState: CompanionVoiceState) {
         guard voiceState != previousState else { return }
 
         if voiceState == .idle {
-            musicDuckingController.restoreAfterPerchVoice()
+            nowPlayingPauseController.resumeNowPlayingAfterPerchVoice()
         } else {
-            // Idempotent: only the first non-idle transition actually ducks.
-            musicDuckingController.duckForPerchVoice()
+            // Idempotent: only the first non-idle transition actually pauses.
+            nowPlayingPauseController.pauseNowPlayingForPerchVoice()
         }
     }
 
