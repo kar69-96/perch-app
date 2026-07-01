@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Xcode / build products
+*.xcuserstate
+xcuserdata/
+notch/build/
+build/
+DerivedData/
+
+# Packaging artifacts
+dist/
+releases/
+*.zip
+
+# Perch on-disk state — all runtime state lives in the repo (resolved by
+# PerchSupportPaths). Ignore the folders' contents; never commit them.
+support/
+logs/
+
+# Local env toggle (never tracked)
+.env
