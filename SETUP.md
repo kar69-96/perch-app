@@ -20,14 +20,7 @@ install, where you'll download, whether you'll strip the quarantine flag), wait 
 run the block in [Quick install](#quick-install-curl--no-xcode). Prefer the scripted path — never
 trigger GUI dialogs on the user's behalf.
 
-**Ask the user:**
-
-1. **Where should Perch be installed?** — `/Applications` (system-wide, default; may prompt for
-   your password) or `~/Applications` (your account only, no admin needed).
-2. If using the fallback: **Where should the DMG download to?** — `/tmp/Perch.dmg` (throwaway, default) or
-   `~/Downloads/Perch.dmg` (kept around).
-3. **Launch Perch when done?** — yes / no.
-4. **Confirm environment** — Apple Silicon and macOS 14.2+? If not, stop and tell the user Perch
+First: **Confirm environment** — Apple Silicon and macOS 14.2+? If not, stop and tell the user Perch
    won't run here.
 
 ---
