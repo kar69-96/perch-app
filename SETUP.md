@@ -10,10 +10,6 @@ fallback.
 - Perch is **not notarized yet**, so macOS Gatekeeper will block the first launch. That's
   expected — the steps below walk past it.
 
-> **Note — first release pending.** Perch's first public release hasn't been cut on
-> `Useperch/perch-app` yet, so the download link below only resolves once a release is
-> published. Until then, use [Build from source](#build-from-source).
-
 ---
 
 ## For AI agents — read this first
