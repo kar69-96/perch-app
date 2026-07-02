@@ -11,6 +11,8 @@ of your display. Hold `⌃ Control + ⌥ Option` to talk, or tap **Control** twi
 
 Paste this into your favorite AI coding agent to set this up for you:
 
+> Reference https://raw.githubusercontent.com/Useperch/perch-app/main/SETUP.md to set up Perch Beta.
+
 ## Say Hi!
 Please email with feedback (or just to say hi!): karthik.reddy@colorado.edu
 
