@@ -30,12 +30,16 @@ struct ComposioManifestState: Equatable {
     let composioEnabled: Bool
     /// Lowercased slugs of the user's already-connected toolkits.
     let connectedToolkitSlugs: Set<String>
+    /// Toolkit slug -> high quality logo URL (from Composio). Used by the
+    /// integrations UI to show distinct, professional icons instead of
+    /// generic favicons or monograms.
+    let toolkitLogos: [String: String]
 
     /// Composio can actually run a connect flow right now.
     var composioAvailable: Bool { manifestPresent && composioEnabled }
 
     static let absent = ComposioManifestState(
-        manifestPresent: false, composioEnabled: false, connectedToolkitSlugs: []
+        manifestPresent: false, composioEnabled: false, connectedToolkitSlugs: [], toolkitLogos: [:]
     )
 }
 
@@ -114,10 +118,21 @@ final class ComposioManifestReader {
         let rawConnectedToolkits = (manifestDictionary["connected_toolkits"] as? [String]) ?? []
         let connectedSlugs = Set(rawConnectedToolkits.map(extractSlug(from:)))
 
+        var toolkitLogos: [String: String] = [:]
+        if let rawLogos = manifestDictionary["toolkit_logos"] as? [String: String] {
+            for (slug, url) in rawLogos {
+                let normalized = extractSlug(from: slug)
+                if !normalized.isEmpty, !url.isEmpty {
+                    toolkitLogos[normalized] = url
+                }
+            }
+        }
+
         return ComposioManifestState(
             manifestPresent: true,
             composioEnabled: composioEnabled,
-            connectedToolkitSlugs: connectedSlugs
+            connectedToolkitSlugs: connectedSlugs,
+            toolkitLogos: toolkitLogos
         )
     }
 

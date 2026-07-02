@@ -94,6 +94,7 @@ private struct IntegrationIcon: View {
                 FigmaLogoMark()
             } else if let resolvedAppIcon = resolvedAppIcon {
                 NotchAppIconTile(appIcon: resolvedAppIcon, tileSize: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             } else if let loadedLogo = logoLoader.image {
                 Image(nsImage: loadedLogo)
                     .resizable()
@@ -119,9 +120,24 @@ private struct IntegrationIcon: View {
         Text(String(entry.displayName.prefix(1)).uppercased())
             .font(.system(size: 10, weight: .bold))
             .foregroundColor(DS.Colors.textSecondary)
+            .frame(width: 16, height: 16)
+            .background(
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
     }
 
     static func logoURL(for entry: ServiceCatalogEntry) -> URL? {
+        let slug = entry.toolkitSlug.lowercased()
+
+        // Prefer logo directly from Composio (via the sidecar manifest). This gives
+        // high-quality, mutually exclusive icons for every connected toolkit without
+        // hardcoding or falling back to generic favicons.
+        let manifestLogos = ComposioManifestReader.standard().currentState().toolkitLogos
+        if let urlString = manifestLogos[slug], let url = URL(string: urlString) {
+            return url
+        }
+
         if let overrideURLString = brandLogoOverrideURLStrings[entry.toolkitSlug] {
             return URL(string: overrideURLString)
         }
@@ -129,12 +145,61 @@ private struct IntegrationIcon: View {
     }
 
     static let brandLogoOverrideURLStrings: [String: String] = [
+        // Google family – distinct branded icons (favicons on docs/sheets subdomains are often generic or Drive-like)
         "gmail":
             "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Gmail_icon_%282020%29.svg/120px-Gmail_icon_%282020%29.svg.png",
         "googlecalendar":
             "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Google_Calendar_icon_%282020%29.svg/120px-Google_Calendar_icon_%282020%29.svg.png",
         "googledrive":
             "https://upload.wikimedia.org/wikipedia/commons/thumb/1/12/Google_Drive_icon_%282020%29.svg/120px-Google_Drive_icon_%282020%29.svg.png",
+        "googledocs":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/01/Google_Docs_logo_%282020%29.svg/120px-Google_Docs_logo_%282020%29.svg.png",
+        "googlesheets":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Google_Sheets_logo_%282020%29.svg/120px-Google_Sheets_logo_%282020%29.svg.png",
+        "googlemeet":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/Google_Meet_icon_%282020%29.svg/120px-Google_Meet_icon_%282020%29.svg.png",
+
+        // Microsoft family – distinct (favicons often collapse to generic blue "M" or cloud)
+        "outlook":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0d/Microsoft_Office_Outlook_%282019%E2%80%93present%29.svg/120px-Microsoft_Office_Outlook_%282019%E2%80%93present%29.svg.png",
+        "microsoft_teams":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Microsoft_Office_Teams_%282018%E2%80%93present%29.svg/120px-Microsoft_Office_Teams_%282018%E2%80%93present%29.svg.png",
+        "one_drive":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Microsoft_Office_OneDrive_%282019%E2%80%93present%29.svg/120px-Microsoft_Office_OneDrive_%282019%E2%80%93present%29.svg.png",
+
+        // Others that benefit from clear branded marks instead of generic favicons
+        "github":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Octicons-mark-github.svg/120px-Octicons-mark-github.svg.png",
+        "gitlab":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/GitLab_Logo.svg/120px-GitLab_Logo.svg.png",
+        "youtube":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/120px-YouTube_full-color_icon_%282017%29.svg.png",
+        "twitter":  // displayed as "X"
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/X_logo_2023.svg/120px-X_logo_2023.svg.png",
+        "reddit":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Reddit_logo_new.svg/120px-Reddit_logo_new.svg.png",
+        "dropbox":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Dropbox_Icon.svg/120px-Dropbox_Icon.svg.png",
+        "stripe":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Stripe_Logo%2C_revised_2016.svg/120px-Stripe_Logo%2C_revised_2016.svg.png",
+        "shopify":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Shopify_logo_2018.svg/120px-Shopify_logo_2018.svg.png",
+        "hubspot":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/HubSpot_Logo.svg/120px-HubSpot_Logo.svg.png",
+        "salesforce":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Salesforce_logo.svg/120px-Salesforce_logo.svg.png",
+        "zendesk":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Zendesk_logo.svg/120px-Zendesk_logo.svg.png",
+        "intercom":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Intercom_logo.svg/120px-Intercom_logo.svg.png",
+        "asana":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Asana_logo.svg/120px-Asana_logo.svg.png",
+        "trello":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/Trello_logo.svg/120px-Trello_logo.svg.png",
+        "discord":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Discord_logo_2021.svg/120px-Discord_logo_2021.svg.png",
+        "zoom":
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/Zoom_logo.svg/120px-Zoom_logo.svg.png",
     ]
 
     static func faviconURL(forHost host: String?) -> URL? {
