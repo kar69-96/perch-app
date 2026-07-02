@@ -34,12 +34,16 @@
 	<string>Used to see your screen so the assistant can help with what you're doing.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Used to transcribe your voice when you talk to the assistant.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>SUEnableDownloaderService</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/Useperch/perch-app/main/perch/updater/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>B1Y47t8C/v8ImurYA+9arEsuCrpxwJSviekiflMElbI=</string>
+	<string>QW/T2PMitVS9LTpW6bhlm3+I8IYgnnO+KpksKnhHYY0=</string>
 	<key>TranscribeTokenURL</key>
 	<string>https://perch-gateway.kar69-96.workers.dev/transcribe-token</string>
 	<key>UTImportedTypeDeclarations</key>

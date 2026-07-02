@@ -33,12 +33,26 @@ set -euo pipefail
 #      Accessibility/Screen Recording/Mic grants survive app UPDATES. Every
 #      future release MUST use the same cert (keep perchdev.keychain-db safe).
 #   6. Builds a compressed DMG with an /Applications drop symlink.
+#   7. Signs the DMG with the Sparkle EdDSA key and prepends the release to
+#      perch/updater/appcast.xml. Installed apps poll that file from
+#      raw.githubusercontent.com (SUFeedURL) and verify the signature against
+#      SUPublicEDKey — so updates only reach users after the appcast change
+#      lands on main AND the release asset is published.
 #
 # Usage:
 #   ./scripts/package-release.sh
 #
 # Env:
 #   PERCH_SKIP_BUILD=1               reuse an existing Release Perch.app
+#   PERCH_SPARKLE_KEY_FILE=<path>    Sparkle EdDSA private key (default:
+#                                    ~/.perch-release/sparkle_ed25519_key —
+#                                    also backed up in the login Keychain as
+#                                    "Private key for signing Sparkle updates").
+#                                    Losing this key means shipped apps can
+#                                    NEVER auto-update again; guard it like
+#                                    perchdev.keychain-db.
+#   PERCH_RELEASE_NOTES_HTML=<html>  appcast release notes body (default links
+#                                    to the GitHub release page)
 #   PERCH_SIDECAR_SOURCE=<dir>       sidecar source (default: sibling backend
 #                                    repo ../beta-backend-perch/browser-subagent)
 #   PERCH_ALLOW_NO_SIDECAR=1         package without the sidecar (agent feature
@@ -66,6 +80,10 @@ DMG_PATH="$REPO_DIR/dist/notch.dmg"
 VOLUME_NAME="Perch"
 SIGN_IDENTITY="Perch Self Signed"
 KEYCHAIN="$HOME/Library/Keychains/perchdev.keychain-db"
+APPCAST="$REPO_DIR/perch/updater/appcast.xml"
+SPARKLE_KEY_FILE="${PERCH_SPARKLE_KEY_FILE:-$HOME/.perch-release/sparkle_ed25519_key}"
+SPARKLE_VERSION="2.9.1"  # keep in lockstep with the Sparkle SPM dependency
+SPARKLE_BIN="$REPO_DIR/perch/build/sparkle-tools/bin"
 
 # ── 1. Release build ─────────────────────────────────────────────────────────
 if [ "${PERCH_SKIP_BUILD:-0}" = "1" ] && [ -d "$SOURCE_APP" ]; then
@@ -163,20 +181,104 @@ rm -rf "$STAGING_DIR"
 SHA="$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)"
 SIZE="$(du -h "$DMG_PATH" | cut -f1)"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-    "$SOURCE_APP/Contents/Info.plist" 2>/dev/null || echo '?')"
+    "$SOURCE_APP/Contents/Info.plist")"
+BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+    "$SOURCE_APP/Contents/Info.plist")"
+
+# ── 7. Sparkle: sign the DMG + refresh the appcast ───────────────────────────
+# Sparkle rejects any update whose EdDSA signature doesn't match SUPublicEDKey,
+# so an unsigned DMG is invisible to installed apps — fail loudly, don't skip.
+if [ ! -f "$SPARKLE_KEY_FILE" ]; then
+    echo "❌ Sparkle private key not found at $SPARKLE_KEY_FILE"
+    echo "   Point PERCH_SPARKLE_KEY_FILE at it, or re-export from the login"
+    echo "   Keychain: generate_keys -x <path>  (Sparkle $SPARKLE_VERSION tools)"
+    exit 1
+fi
+if [ ! -x "$SPARKLE_BIN/sign_update" ]; then
+    echo "▶︎ Fetching Sparkle $SPARKLE_VERSION sign_update tool…"
+    mkdir -p "$(dirname "$SPARKLE_BIN")"
+    curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" \
+        | tar -xJ -C "$(dirname "$SPARKLE_BIN")" bin/sign_update
+fi
+
+echo "▶︎ Signing DMG for Sparkle…"
+SIGN_OUTPUT="$("$SPARKLE_BIN/sign_update" -f "$SPARKLE_KEY_FILE" "$DMG_PATH")"
+ED_SIGNATURE="$(echo "$SIGN_OUTPUT" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')"
+DMG_LENGTH="$(echo "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+if [ -z "$ED_SIGNATURE" ] || [ -z "$DMG_LENGTH" ]; then
+    echo "❌ Could not parse sign_update output: $SIGN_OUTPUT"
+    exit 1
+fi
+
+echo "▶︎ Updating ${APPCAST}…"
+PUB_DATE="$(date -u +"%a, %d %b %Y %H:%M:%S +0000")" \
+VERSION="$VERSION" BUILD="$BUILD" ED_SIGNATURE="$ED_SIGNATURE" \
+DMG_LENGTH="$DMG_LENGTH" APPCAST="$APPCAST" \
+NOTES_HTML="${PERCH_RELEASE_NOTES_HTML:-}" \
+python3 <<'PY'
+import os, re, sys
+
+env = os.environ
+appcast, version, build = env["APPCAST"], env["VERSION"], env["BUILD"]
+notes = env["NOTES_HTML"] or (
+    f'<p>See the <a href="https://github.com/Useperch/perch-app/releases/tag/'
+    f'v{version}">release notes</a> for details.</p>')
+
+item = f"""        <item>
+            <title>{version}</title>
+            <pubDate>{env["PUB_DATE"]}</pubDate>
+            <link>https://github.com/Useperch/perch-app/releases/tag/v{version}</link>
+            <sparkle:version>{build}</sparkle:version>
+            <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[{notes}]]></description>
+            <enclosure url="https://github.com/Useperch/perch-app/releases/download/v{version}/notch.dmg" length="{env["DMG_LENGTH"]}" type="application/octet-stream" sparkle:edSignature="{env["ED_SIGNATURE"]}"/>
+        </item>"""
+
+with open(appcast) as f:
+    xml = f.read()
+
+# Re-packaging the same build replaces its entry instead of duplicating it.
+for existing in re.findall(r" {8}<item>.*?</item>\n", xml, flags=re.S):
+    if f"<sparkle:version>{build}</sparkle:version>" in existing:
+        xml = xml.replace(existing, "")
+
+stale = [int(m) for m in re.findall(r"<sparkle:version>(\d+)</sparkle:version>", xml)
+         if int(m) >= int(build)]
+if stale:
+    print(f"   ⚠️  appcast already lists build {max(stale)} ≥ this build {build} —"
+          f" installed apps won't see this as an update. Bump MARKETING_VERSION"
+          f" and CURRENT_PROJECT_VERSION in notch.xcodeproj.")
+
+anchor = "        <link>https://github.com/Useperch/perch-app</link>\n"
+if anchor not in xml:
+    sys.exit(f"channel <link> anchor not found in {appcast} — was it hand-edited?")
+with open(appcast, "w") as f:
+    f.write(xml.replace(anchor, anchor + item + "\n", 1))
+print(f"   appcast entry added: v{version} (build {build})")
+PY
 
 cat <<EOF
 
 ✅ Release DMG ready
    Path:    $DMG_PATH
-   Version: $VERSION
+   Version: $VERSION (build $BUILD)
    Size:    $SIZE
    SHA256:  $SHA
+   Sparkle: signed; appcast updated at perch/updater/appcast.xml
 
-Publish (asset name must stay notch.dmg — SETUP.md and the site depend on it):
-  gh release create v$VERSION "$DMG_PATH" --target main \\
-      --title "Perch v$VERSION" --notes "…"
+Publish — updates reach installed apps only after BOTH steps:
+  1. gh release create v$VERSION "$DMG_PATH" --target main \\
+         --title "Perch v$VERSION" --notes "…"
+     (asset name must stay notch.dmg — SETUP.md, the site, and the appcast
+      enclosure URL all depend on it)
+  2. git add perch/updater/appcast.xml && git commit && git push
+     (installed apps poll the appcast from raw.githubusercontent.com/…/main)
+
+Before the NEXT release: bump MARKETING_VERSION and CURRENT_PROJECT_VERSION in
+notch.xcodeproj — Sparkle only offers an update when CFBundleVersion increases.
 
 Users install via SETUP.md — the app is not notarized, so the guide has them
-clear quarantine (xattr -dr com.apple.quarantine).
+clear quarantine (xattr -dr com.apple.quarantine). Sparkle-installed UPDATES
+are not quarantined, so only the first install needs that step.
 EOF
