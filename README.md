@@ -22,6 +22,16 @@ Worker) over HTTPS; **no third-party API keys ever ship in the app**.
 - **Not open:** the gateway Worker (which holds the provider keys), the account/billing
   backend, and the agent sidecar.
 
+## Install (or hand it to your agent)
+
+Don't want to build from source? Paste this to your coding agent (Claude Code, Cursor, …):
+
+> Reference https://raw.githubusercontent.com/Useperch/perch-app/main/SETUP.md to set up Perch Beta.
+
+It'll download Perch, install it, and walk past Gatekeeper — asking you where to put things first.
+Prefer to do it yourself? [SETUP.md](./SETUP.md) has a copy-paste `curl` install and a plain
+double-click-the-DMG fallback.
+
 ## Build from source
 
 Requires the full **Xcode** (macOS 14.2+). Asset catalogs need Xcode's tooling, so the
@@ -38,13 +48,18 @@ can hear you and see your screen.
 
 ## Accounts & pricing
 
-- Enter your email at onboarding — no password, no code.
+- Enter your email at onboarding and confirm the one-time code we email you — no password.
 - **Free:** 25 messages a month (voice or text), metered to your account.
 - **Pro ($20/mo):** unlimited messages + the autonomous agent. Upgrade from inside the
   app; it links to your email automatically.
 
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for how
+the client is laid out and what builds against the hosted gateway.
+
 ## License
 
-Perch is released under the **GNU General Public License v3.0 (GPL-3.0)** — the same
-license as [boring.notch](https://github.com/TheBoredTeam/boring.notch), the project
-Perch's notch shell is built on. See [LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md).
+Perch is a fork of [boring.notch](https://github.com/TheBoredTeam/boring.notch) and is
+released under the **GNU General Public License v3.0 (GPL-3.0)**, the same license. See
+[LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md) for full attribution.
