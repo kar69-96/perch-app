@@ -299,6 +299,26 @@ final class PerchInstallIdentity: ObservableObject {
         return message
     }
 
+    /// Performs an install-token-authorized GET against a gateway path (e.g.
+    /// "/daily-headlines") and returns the raw response body, or nil on any transport
+    /// error / non-2xx. Keeps the token + session details encapsulated here so callers
+    /// (like the Daily Brief's headline fetch) never touch the install token directly.
+    func gatewayGet(path: String) async -> Data? {
+        guard let url = URL(string: "\(Self.workerBaseURL)\(path)") else { return nil }
+        let request = authorizedRequest(url: url, method: "GET")
+        do {
+            let (data, response) = try await Self.registrationSession.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                perchDebugLog("gateway-get \(path): non-2xx or bad response")
+                return nil
+            }
+            return data
+        } catch {
+            perchDebugLog("gateway-get \(path): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     /// Builds a request carrying the install token (the Worker's auth principal).
     private func authorizedRequest(url: URL, method: String) -> URLRequest {
         var request = URLRequest(url: url)

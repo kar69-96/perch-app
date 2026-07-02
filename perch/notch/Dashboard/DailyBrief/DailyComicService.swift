@@ -15,16 +15,18 @@ import AppKit
 
 enum DailyComicService {
 
-    /// Hand-picked classic XKCD strips that reliably land — mostly tech/nerd humor, which
-    /// fits the audience. Rotated by day so the comic changes but is always a known-good one.
-    /// (327 Bobby Tables · 149 sudo sandwich · 353 import antigravity · 303 Compiling ·
-    ///  386 Duty Calls · 538 $5 wrench · 979 Wisdom of the Ancients · 1597 Git ·
-    ///  1168 tar · 1132 Frequentists vs Bayesians · 936 Password Strength · 2347 Dependency ·
-    ///  1838 Machine Learning · 1739 Fixing Problems · 1053 Ten Thousand · 1205 Is It Worth the Time ·
-    ///  285 Wikipedian Protester · 1316 Inexplicable.)
+    /// Hand-picked XKCD strips chosen for *general-audience* humor — everyday, relatable,
+    /// wordplay and absurdist jokes rather than programming/math in-jokes, so the comic is
+    /// funny to everyone, not just engineers. Rotated by day so it changes but is always a
+    /// known-good, broadly funny one.
+    /// (386 Duty Calls · 285 Wikipedian Protester · 1053 Ten Thousand · 946 Family Decals ·
+    ///  1210 I'm So Random · 1145 Sky Color · 1538 Lyrics · 605 Extrapolating ·
+    ///  1096 Clinically Studied Ingredient · 891 Movie Ages · 1567 Kitchen Tips ·
+    ///  748 Worst-Case Scenario · 964 Dorm Poster · 1592 Overthinking · 1985 Meteorologist ·
+    ///  1097 A Hypochondriac's Nightmare.)
     private static let funnyComicNumbers = [
-        327, 149, 353, 303, 386, 538, 979, 1597, 1168, 1132,
-        936, 2347, 1838, 1739, 1053, 1205, 285, 1316
+        386, 285, 1053, 946, 1210, 1145, 1538, 605,
+        1096, 891, 1567, 748, 964, 1592, 1985, 1097
     ]
 
     /// Fetch the day's curated comic. Returns `nil` on any network/parse/image failure so

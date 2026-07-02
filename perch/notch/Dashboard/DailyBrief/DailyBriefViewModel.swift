@@ -45,10 +45,14 @@ final class DailyBriefViewModel: ObservableObject {
     @Published private(set) var isLoadingNews = false
 
     /// The day this brief is for — used to format event times and to key the once-per-day
-    /// seeding of the editable lists.
-    private let date: Date
+    /// seeding of the editable lists. A `var` (not `let`) so the brief can roll over to the
+    /// new day when it's re-shown after midnight (see `loadIfNeeded`).
+    private var date: Date
     private let generator = DailyBriefGenerator()
-    private var hasLoaded = false
+    /// The `yyyy-MM-dd` key of the day currently loaded, or nil before the first load.
+    /// Replaces a plain "loaded once" flag so the brief reloads when the day changes
+    /// rather than staying frozen on the day it was first opened until an app relaunch.
+    private var loadedDayKey: String?
 
     init(date: Date = Date()) {
         self.date = date
@@ -62,8 +66,21 @@ final class DailyBriefViewModel: ObservableObject {
     /// the Claude-synthesized prose (summary + the day's catch-up / priorities). Each runs
     /// independently so a slow source never blocks the others.
     func loadIfNeeded() {
-        guard !hasLoaded else { return }
-        hasLoaded = true
+        // Reload whenever the calendar day has changed since the last load (including the
+        // very first load, when `loadedDayKey` is nil). Because the window is re-shown via
+        // `.onAppear`, a brief left open across midnight refreshes the next time it's opened
+        // — no app relaunch — instead of staying frozen on its original day.
+        let today = Self.dayKey(for: Date())
+        guard loadedDayKey != today else { return }
+        loadedDayKey = today
+
+        // Advance the brief to the new day and re-derive the instant, local facts so the
+        // title card (weekday, date line, artwork) matches the day being loaded.
+        date = Date()
+        weekdayName = DailyBriefDateText.weekdayName(for: date)
+        dateLine = DailyBriefDateText.ordinalDateLine(for: date)
+        artwork = DailyBriefArtworkLibrary.artwork(for: date)
+
         Task { comic = await DailyComicService.fetchTodaysComic(for: date) }
         Task { await loadLiveNews() }
         Task { await loadDayContext() }
@@ -138,7 +155,11 @@ final class DailyBriefViewModel: ObservableObject {
 
     /// A stable "yyyy-MM-dd" key for the brief's day, used to seed the editable lists once
     /// per calendar day.
-    private var dayKey: String {
+    private var dayKey: String { Self.dayKey(for: date) }
+
+    /// The "yyyy-MM-dd" key for a given date. Static so `loadIfNeeded` can key "today"
+    /// independently of the brief's (possibly stale) `date` to detect a day rollover.
+    private static func dayKey(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
@@ -186,25 +207,14 @@ final class DailyBriefViewModel: ObservableObject {
 
     // MARK: News
 
-    /// One real headline per topic, fetched concurrently, so the news reads as a diverse
-    /// spread of the morning with each item linking to its actual article.
+    /// The day's news is a single globally-shared set generated once daily by the backend
+    /// (identical for every user), fetched from the gateway rather than run per-user here.
+    /// This is what makes the headlines the same for everyone and genuinely date-scoped to
+    /// today; the diverse tech/world/markets/science/sports spread is chosen server-side.
     private func loadLiveNews() async {
         isLoadingNews = true
-        async let tech = Self.topHeadline(query: "latest technology news today")
-        async let world = Self.topHeadline(query: "top world news today")
-        async let markets = Self.topHeadline(query: "stock market news today")
-        async let science = Self.topHeadline(query: "science news today")
-        async let sports = Self.topHeadline(query: "sports news today")
-        headlines = await [tech, world, markets, science, sports].compactMap { $0 }
+        headlines = await DailyHeadlinesClient.fetch()
         isLoadingNews = false
-    }
-
-    /// Fetch the single top web-news result for a topic, keeping only items that carry a
-    /// real article URL (so the headline is clickable through to the source).
-    private static func topHeadline(query: String) async -> DailyBriefHeadline? {
-        let items = await fetchItems(provider: .webNews, query: query, limit: 3)
-        guard let item = items.first(where: { !($0.url ?? "").isEmpty }) else { return nil }
-        return DailyBriefHeadline(id: item.url ?? item.id, title: item.title, url: item.url)
     }
 
     // MARK: Fetch helper
