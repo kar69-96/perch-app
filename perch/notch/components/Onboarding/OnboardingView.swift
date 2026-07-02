@@ -9,8 +9,8 @@ import SwiftUI
 import AVFoundation
 import CoreGraphics
 
-// Permission flow follows the "Hear → See → Act" ordering principle from
-// docs/onboarding-permissions.md: lead with the three core capabilities Perch
+// Permission flow follows the "Hear → See → Act" ordering principle:
+// lead with the three core capabilities Perch
 // uses the moment you press a hotkey — Microphone (Ears), Screen Recording
 // (Eyes), and Accessibility (Hands) — then the optional notch widgets (Calendar /
 // Reminders) and the music source.
