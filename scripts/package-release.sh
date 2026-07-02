@@ -44,6 +44,13 @@ set -euo pipefail
 #   PERCH_ALLOW_NO_SIDECAR=1         package without the sidecar (agent feature
 #                                    will be unavailable in the shipped app)
 #   PERCH_SIGN_KEYCHAIN_PASSWORD     perchdev keychain password (default: perch)
+#   PERCH_WORKFLOW_SHARE_CLIENT_SECRET
+#                                    real X-Perch-Client secret injected into the
+#                                    staged Info.plist (also read from ./.env,
+#                                    which is gitignored). The committed plist
+#                                    carries only the YOUR_WORKFLOW_SHARE_SECRET
+#                                    placeholder; without a real value the
+#                                    shipped app's workflow-share upload 401s.
 # =============================================================================
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -87,6 +94,23 @@ PLIST="$APP_COPY/Contents/Info.plist"
 for key in BrowserSubagentPath PerchRepoRoot BrowserSubagentSocketPath; do
     plutil -remove "$key" "$PLIST" 2>/dev/null || true
 done
+
+# ── 3.5. Inject the workflow-share client secret ─────────────────────────────
+# The committed Info.plist holds only a placeholder so the public repo never
+# carries the real secret. Releases get the real value here, from the env or
+# the gitignored .env at the repo root.
+if [ -z "${PERCH_WORKFLOW_SHARE_CLIENT_SECRET:-}" ] && [ -f "$REPO_DIR/.env" ]; then
+    PERCH_WORKFLOW_SHARE_CLIENT_SECRET="$(grep -m1 '^PERCH_WORKFLOW_SHARE_CLIENT_SECRET=' \
+        "$REPO_DIR/.env" | cut -d= -f2-)"
+fi
+if [ -n "${PERCH_WORKFLOW_SHARE_CLIENT_SECRET:-}" ]; then
+    echo "▶︎ Injecting workflow-share client secret…"
+    plutil -replace WorkflowShareClientSecret \
+        -string "$PERCH_WORKFLOW_SHARE_CLIENT_SECRET" "$PLIST"
+else
+    echo "⚠️  PERCH_WORKFLOW_SHARE_CLIENT_SECRET not set (env or .env) — the"
+    echo "   placeholder ships and workflow-share uploads will 401 in this build."
+fi
 
 # ── 4. Bundle the sidecar (open-core seam) ───────────────────────────────────
 SIDECAR_SOURCE="${PERCH_SIDECAR_SOURCE:-$REPO_DIR/../beta-backend-perch/browser-subagent}"
