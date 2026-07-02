@@ -2080,7 +2080,7 @@ final class CompanionManager: ObservableObject {
     }
 
     private func displayCreditsErrorMessage() {
-        let message = "I'm all out of credits. Please DM Farza and tell him to bring me back to life."
+        let message = "I'm all out of credits. Please upgrade for more!"
         PerchRunLog.append(activeRun, .action, "\(message) (shown as text at notch)")
 
         // Make sure the cursor overlay is on screen so the text bubble is

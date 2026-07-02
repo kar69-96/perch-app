@@ -28,10 +28,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SIGN_IDENTITY="Clicky Self Signed"
 KEYCHAIN="$HOME/Library/Keychains/clickydev.keychain-db"
-PROJECT="$REPO_DIR/notch/notch.xcodeproj"
+PROJECT="$REPO_DIR/perch/notch.xcodeproj"
 SCHEME="notch"
-ENTITLEMENTS="$REPO_DIR/notch/notch/notch.entitlements"
-DERIVED_DATA="$REPO_DIR/notch/build/DerivedData"
+ENTITLEMENTS="$REPO_DIR/perch/notch/notch.entitlements"
+DERIVED_DATA="$REPO_DIR/perch/build/DerivedData"
 BUILT_APP="$DERIVED_DATA/Build/Products/Release/Perch.app"
 # The renamed dev bundle lives beside the build product, in-repo, at a stable path.
 APP="$DERIVED_DATA/Build/Products/Release/Perch Dev.app"
@@ -79,7 +79,9 @@ plist_set PerchRepoRoot              "${REPO_DIR}"
 # browser-subagent/ — it lives in a sibling backend worktree. Prefer
 # `backend-dev-work` (the active dev-work branch the user builds against), then
 # fall back to `backend`, then an in-repo copy if one ever exists.
-if [ -d "${REPO_DIR}/../backend-dev-work/browser-subagent" ]; then
+if [ -d "${REPO_DIR}/../beta-backend-perch/browser-subagent" ]; then
+    SIDECAR_DIR="$(cd "${REPO_DIR}/../beta-backend-perch/browser-subagent" && pwd)"
+elif [ -d "${REPO_DIR}/../backend-dev-work/browser-subagent" ]; then
     SIDECAR_DIR="$(cd "${REPO_DIR}/../backend-dev-work/browser-subagent" && pwd)"
 elif [ -d "${REPO_DIR}/../backend/browser-subagent" ]; then
     SIDECAR_DIR="$(cd "${REPO_DIR}/../backend/browser-subagent" && pwd)"
