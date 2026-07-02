@@ -1,8 +1,8 @@
-# Setting up Perch (no Xcode required)
+# Setting up Perch 
 
 This guide installs the **Perch** notch app on your Mac without building from source — a
-copy-paste `curl` install for you or your coding agent, with a plain double-click-the-DMG
-fallback. It works for a human reading top-to-bottom *or* an AI agent you hand it to.
+copy-paste `curl` install for you or your coding agent, with a fallback as a double-click-the-DMG
+fallback. 
 
 **Requirements**
 
@@ -28,21 +28,15 @@ trigger GUI dialogs on the user's behalf.
 
 1. **Where should Perch be installed?** — `/Applications` (system-wide, default; may prompt for
    your password) or `~/Applications` (your account only, no admin needed).
-2. **Where should the DMG download to?** — `/tmp/Perch.dmg` (throwaway, default) or
+2. If using the fallback: **Where should the DMG download to?** — `/tmp/Perch.dmg` (throwaway, default) or
    `~/Downloads/Perch.dmg` (kept around).
-3. **May I strip the Gatekeeper quarantine flag?** — Required, because Perch isn't notarized yet.
-   You'll run `xattr -dr com.apple.quarantine` on the installed app — the same thing the official
-   Homebrew cask does in its postflight. It only removes the "downloaded from the internet"
-   marker on Perch; it changes nothing else on the system. Get an explicit yes.
-4. **Launch Perch when done?** — yes / no.
-5. **Confirm environment** — Apple Silicon and macOS 14.2+? If not, stop and tell the user Perch
+3. **Launch Perch when done?** — yes / no.
+4. **Confirm environment** — Apple Silicon and macOS 14.2+? If not, stop and tell the user Perch
    won't run here.
-
-Then set `DEST` and `DMG` in the script below to match answers 1 and 2, and run it.
 
 ---
 
-## Quick install (curl — no Xcode)
+## Quick install 
 
 Paste this into Terminal (or have your agent run it). It downloads the DMG, copies Perch into your
 Applications folder, clears the Gatekeeper quarantine flag, and launches it.
@@ -75,19 +69,6 @@ xattr -dr com.apple.quarantine "$DEST/Perch.app"
 open "$DEST/Perch.app"
 ```
 
-What each step does:
-
-1. **Download** — `curl -fL` follows redirects and fails cleanly on an error (e.g. no release yet)
-   instead of saving an HTML error page.
-2. **Mount** — attaches the DMG without opening a Finder window and reads the actual mount path
-   from `hdiutil`, so it doesn't matter what the volume is named.
-3. **Copy** — finds the `.app` inside the image (its name may be `Perch.app` or `notch.app`) and
-   installs it as `Perch.app`, replacing any old copy.
-4. **Unmount** — ejects the disk image.
-5. **Un-quarantine** — removes the "downloaded from the internet" flag so macOS will open an
-   un-notarized app. This is the only reason a plain double-click would otherwise fail.
-6. **Launch** — opens Perch. It lives in the notch (see [First launch](#first-launch)).
-
 ---
 
 ## Fallback — download the DMG by hand
@@ -108,8 +89,8 @@ If you'd rather click than run a script:
 
 ## Build from source
 
-Want to modify Perch, or installing before the first release is published? Build it yourself — see
-[**Build from source** in the README](./README.md#build-from-source). In short:
+Want to modify Perch? Build it yourself!
+In short:
 
 ```sh
 ./scripts/build-perch.sh
