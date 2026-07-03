@@ -53,4 +53,9 @@ extension Notification.Name {
     /// Posted to open the notch's tray (Shelf) page as a drop zone for query
     /// context — fired by the composer's "+" button.
     static let perchShowShelf = Notification.Name("perchShowShelf")
+    /// Posted when a background agent needs the user's answer (a confirmation
+    /// gate or a connect-integration request). The front-end auto-opens the
+    /// closed notch so the card is actually seen — the sidecar auto-denies a
+    /// confirmation after ~120s, so an invisible ask is a denied ask.
+    static let perchAgentAttentionRequired = Notification.Name("perchAgentAttentionRequired")
 }

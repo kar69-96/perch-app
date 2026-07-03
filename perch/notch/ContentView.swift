@@ -241,6 +241,7 @@ struct ContentView: View {
                                 companionManager.voiceState != .idle
                                     || coordinator.sneakPeek.show
                                     || companionManager.serviceConnectionOfferCoordinator.currentOffer != nil
+                                    || companionManager.pendingAgentConfirmation != nil
                             }
                         )
                     }
@@ -262,6 +263,24 @@ struct ContentView: View {
                     // guard bails while the composer is (was) active.
                     .onReceive(NotificationCenter.default.publisher(for: .perchShowShelf)) { _ in
                         coordinator.currentView = .shelf
+                        withAnimation(animationSpring) {
+                            vm.open()
+                        }
+                    }
+                    // A background agent needs an answer (confirmation gate /
+                    // connect-integration request): auto-open the closed notch on the
+                    // home view, where the card renders — an unseen confirmation is
+                    // auto-denied by the sidecar after ~120s. Skip while the composer
+                    // is active (mirrors doOpen's guard) or a system Focus is on; the
+                    // card still shows whenever the user opens the notch themselves.
+                    .onReceive(
+                        NotificationCenter.default.publisher(for: .perchAgentAttentionRequired)
+                    ) { _ in
+                        guard vm.notchState == .closed,
+                              !textInput.isActive,
+                              !companionManager.systemFocusStatusMonitor.isFocusActive
+                        else { return }
+                        coordinator.currentView = .home
                         withAnimation(animationSpring) {
                             vm.open()
                         }

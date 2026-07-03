@@ -159,6 +159,17 @@ final class CompanionManager: ObservableObject {
     /// Each entry is the user's transcript and Claude's response.
     private var conversationHistory: [(userTranscript: String, assistantResponse: String)] = []
 
+    /// A question the assistant asked on its LAST turn (a [CLARIFY:...] or any
+    /// reply ending in a question mark) plus the user request it was asked about.
+    /// The flat history gives a short follow-up ("just the ones for next week")
+    /// no anchor, so the model has mis-bound such replies to OLDER tasks; the
+    /// next turn injects this as a structured block and pops it (one-shot).
+    private struct OpenAssistantQuestion {
+        let question: String
+        let aboutUserRequest: String
+    }
+    private var pendingOpenQuestion: OpenAssistantQuestion?
+
     /// The typed-chat thread the notch composer renders as message bubbles. This is
     /// a UI-only projection, kept parallel to (not merged with) `conversationHistory`
     /// — it holds full display text, per-message identity, a streaming flag, and
@@ -197,6 +208,22 @@ final class CompanionManager: ObservableObject {
     /// One connection-gate subscription per live run, keyed by subagent id. When a
     /// run needs an unconnected Composio app, this drives the connect popup(s).
     private var runConnectionRequestCancellables: [String: AnyCancellable] = [:]
+
+    /// The one agent confirmation currently shown on the notch home, if any. Set
+    /// when a run pauses at the sidecar's confirmation gate ("allow Perch to
+    /// control X on your screen?", a destructive browser action, …); cleared when
+    /// the user answers, the ask expires, or the owning run ends. One at a time —
+    /// a second run's ask waits and is promoted when this one clears.
+    @Published private(set) var pendingAgentConfirmation: PendingBrowserSubagentConfirmation?
+    /// One confirmation-gate subscription per live run, keyed by subagent id.
+    private var runConfirmationCancellables: [String: AnyCancellable] = [:]
+    /// Clears a shown confirmation that the sidecar has ALREADY auto-denied: the
+    /// sidecar times out its gate silently (no event), and nothing else ever nils
+    /// the run's `pendingConfirmation`, so without this the card would linger.
+    private var agentConfirmationExpiryTask: Task<Void, Never>?
+    /// Matches the sidecar's `DEFAULT_CONFIRMATION_TIMEOUT_SECONDS` — answering
+    /// after this is answering a question the sidecar already denied.
+    private static let agentConfirmationExpirySeconds: TimeInterval = 120
 
     /// Owns the local browser subagent (sidecar + IPC). Background browser tasks
     /// tagged by Claude with [BACKGROUND_TASK:...] are routed here.
@@ -707,6 +734,9 @@ final class CompanionManager: ObservableObject {
         runStateCancellables.removeAll()
         runConnectionRequestCancellables.values.forEach { $0.cancel() }
         runConnectionRequestCancellables.removeAll()
+        runConfirmationCancellables.values.forEach { $0.cancel() }
+        runConfirmationCancellables.removeAll()
+        clearAgentConfirmation()
         browserSubagentManager.shutdown()
         notchAlertIngestionService.stop()
         systemFocusStatusMonitor.stop()
@@ -887,6 +917,88 @@ final class CompanionManager: ObservableObject {
                     run: newRun, toolkitSlugs: toolkitSlugs
                 )
             }
+
+        // Surface this run's confirmation gate ("Perch needs your OK…") on the
+        // notch home. Without this the sidecar's ask silently times out — the old
+        // renderer (the retired hover preview panel) is never on screen.
+        runConfirmationCancellables[newRun.id] = newRun.$pendingConfirmation
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak newRun] confirmation in
+                guard let self, let newRun else { return }
+                self.handleBrowserSubagentConfirmationChange(
+                    run: newRun, confirmation: confirmation
+                )
+            }
+    }
+
+    /// One run's confirmation gate changed: show it (if nothing else is showing),
+    /// or — when the shown one was answered/cleared — promote the next pending ask.
+    private func handleBrowserSubagentConfirmationChange(
+        run: BrowserSubagentRun,
+        confirmation: PendingBrowserSubagentConfirmation?
+    ) {
+        if let confirmation {
+            guard pendingAgentConfirmation == nil else { return }  // one at a time
+            presentAgentConfirmation(confirmation)
+        } else {
+            // The run's ask was answered (respondToConfirmation nils it) or its
+            // run was torn down. Clear the card if it was the shown one, then
+            // surface any ask another run queued meanwhile (no-op otherwise).
+            if pendingAgentConfirmation?.subagentId == run.id {
+                clearAgentConfirmation()
+            }
+            promoteNextPendingAgentConfirmation()
+        }
+    }
+
+    private func presentAgentConfirmation(
+        _ confirmation: PendingBrowserSubagentConfirmation
+    ) {
+        pendingAgentConfirmation = confirmation
+        NotificationCenter.default.post(name: .perchAgentAttentionRequired, object: nil)
+        // The sidecar auto-denies its gate on timeout WITHOUT emitting an event, so
+        // expire the card client-side in lockstep — answering later would be
+        // answering a question the sidecar already resolved.
+        agentConfirmationExpiryTask?.cancel()
+        agentConfirmationExpiryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(Self.agentConfirmationExpirySeconds * 1_000_000_000)
+            )
+            guard let self, !Task.isCancelled else { return }
+            guard self.pendingAgentConfirmation?.id == confirmation.id else { return }
+            self.clearAgentConfirmation()
+            self.promoteNextPendingAgentConfirmation()
+        }
+    }
+
+    private func clearAgentConfirmation() {
+        agentConfirmationExpiryTask?.cancel()
+        agentConfirmationExpiryTask = nil
+        pendingAgentConfirmation = nil
+    }
+
+    /// Another live run may have gated while one ask was showing — surface it now.
+    private func promoteNextPendingAgentConfirmation() {
+        guard pendingAgentConfirmation == nil else { return }
+        if let nextConfirmation = browserSubagentManager.runs
+            .compactMap({ $0.pendingConfirmation })
+            .first {
+            presentAgentConfirmation(nextConfirmation)
+        }
+    }
+
+    /// The user answered the shown confirmation card. Sends the verdict to the
+    /// sidecar; the run's `pendingConfirmation` is nilled by the manager, which
+    /// re-enters the change handler above and promotes any queued ask.
+    func respondToAgentConfirmation(approved: Bool) {
+        guard let confirmation = pendingAgentConfirmation else { return }
+        clearAgentConfirmation()
+        Task {
+            await browserSubagentManager.respondToConfirmation(
+                subagentId: confirmation.subagentId, approved: approved
+            )
+        }
     }
 
     /// A run paused at a connection gate: show the connect popup for each needed
@@ -898,6 +1010,10 @@ final class CompanionManager: ObservableObject {
     ) {
         let subagentId = run.id
         let catalog = ServiceCatalog.loadFromBundle()
+        // The connect card renders only inside the OPEN notch — get the user's
+        // attention the same way a confirmation ask does, or the run blocks
+        // invisibly at the connection gate until the user happens to open it.
+        NotificationCenter.default.post(name: .perchAgentAttentionRequired, object: nil)
         Task { @MainActor [weak self] in
             guard let self else { return }
             for toolkitSlug in toolkitSlugs {
@@ -933,6 +1049,14 @@ final class CompanionManager: ObservableObject {
             // deliverable in the user's real Chrome window.
             openDeliverableInBrowserIfAvailable(for: finishedOrWorkingRun)
             announceBackgroundTaskCompletion(for: finishedOrWorkingRun)
+        } else if newState == .error {
+            // A failed task must read as CLOSED in conversation history too, or
+            // the model keeps treating it as live and re-binds follow-ups to it.
+            recordBackgroundTaskClosure(
+                taskDescription: finishedOrWorkingRun.taskDescription,
+                didSucceed: false,
+                summary: "the agent hit an error and stopped"
+            )
         }
 
         // Drop this run's subscription and remove it from the registry.
@@ -941,6 +1065,14 @@ final class CompanionManager: ObservableObject {
         runStateCancellables[finishedSubagentId] = nil
         runConnectionRequestCancellables[finishedSubagentId]?.cancel()
         runConnectionRequestCancellables[finishedSubagentId] = nil
+        runConfirmationCancellables[finishedSubagentId]?.cancel()
+        runConfirmationCancellables[finishedSubagentId] = nil
+        // A confirmation card belonging to a run that just ended is unanswerable —
+        // drop it and surface any ask another live run queued behind it.
+        if pendingAgentConfirmation?.subagentId == finishedSubagentId {
+            clearAgentConfirmation()
+            promoteNextPendingAgentConfirmation()
+        }
         browserSubagentManager.discardRun(finishedSubagentId)
     }
 
@@ -1134,6 +1266,12 @@ final class CompanionManager: ObservableObject {
 
     don't over-clarify: if it's clearly a DO and a sensible default is obvious, just do it — only CLARIFY for real ambiguity or a guess you shouldn't make on the user's behalf.
 
+    follow-ups and open questions (read this before choosing a lane):
+    - when your last turn asked the user a question (a [CLARIFY:...] or any reply ending in a question mark), their next message is almost always the ANSWER. bind it to the request that question was about — the MOST RECENT open request — never to an older task from earlier in the conversation.
+    - an elliptical reply ("just the ones for next week", "yes go ahead", "the second one") refines that most recent request. when you turn it into a task, carry EVERY detail of the original request forward — source, destination, app names, services — plus the user's refinement.
+    - history entries marked [started background task: ...] followed by [background task done/failed: ...] are CLOSED business. never re-run or extend a closed task unless the user explicitly asks again.
+    - when a DO names a target app or service ("move events to my outlook calendar", "put it in notion"), the [BACKGROUND_TASK:...] description MUST name that app or service explicitly — a task that drops the destination is wrong even if everything else is right.
+
     element pointing (SHOW lane only):
     you have a small blue triangle cursor that can fly to and point at things on screen. once you've decided the lane is SHOW, use it whenever pointing would genuinely help — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. within the SHOW lane, err on the side of pointing rather than not, because it makes your help way more useful and concrete.
 
@@ -1205,6 +1343,12 @@ final class CompanionManager: ObservableObject {
     - DO: they want something CHANGED or done for them — created, typed, sent, opened, booked, signed up. hand it to a background agent (see below). do NOT narrate steps.
     - SHOW: they want to KNOW something — understand, learn, or get an answer. just answer them in one short enthusiastic sentence.
     - CLARIFY: only if you genuinely can't tell what they want, or a DO needs a detail you shouldn't guess. ask ONE short question.
+
+    follow-ups and open questions (read this before choosing a lane):
+    - when your last turn asked the user a question (a [CLARIFY:...] or any reply ending in a question mark), their next message is almost always the ANSWER. bind it to the request that question was about — the MOST RECENT open request — never to an older task from earlier in the conversation.
+    - an elliptical reply ("just the ones for next week", "yes go ahead", "the second one") refines that most recent request. when you turn it into a task, carry EVERY detail of the original request forward — source, destination, app names, services — plus the user's refinement.
+    - history entries marked [started background task: ...] followed by [background task done/failed: ...] are CLOSED business. never re-run or extend a closed task unless the user explicitly asks again.
+    - when a DO names a target app or service ("move events to my outlook calendar", "put it in notion"), the [BACKGROUND_TASK:...] description MUST name that app or service explicitly — a task that drops the destination is wrong even if everything else is right.
 
     background do-it-for-me tasks (DO lane):
     when the lane is DO, hand it to a background agent that drives it to completion while the user keeps working. end your response with a tag on its own at the very end: [BACKGROUND_TASK:<concise task description>]. include enough context for the agent to act (which app or site, what value). keep your spoken text to a short, natural confirmation BEFORE the tag.
@@ -1378,6 +1522,26 @@ final class CompanionManager: ObservableObject {
                     "[\(index)] user: \(exchange.userPlaceholder)\n    assistant: \(exchange.assistantResponse)"
                 }.joined(separator: "\n")
 
+                // If the assistant's LAST turn asked a question, anchor this turn's
+                // message to it (pop-once): elliptical replies ("just the ones for
+                // next week", "yes") must bind to the request that question was
+                // about — never to an older task in the flat history. The block
+                // rides the USER prompt because the system prompts are static.
+                let openQuestion = pendingOpenQuestion
+                pendingOpenQuestion = nil
+                let effectiveUserPrompt: String
+                if let openQuestion {
+                    effectiveUserPrompt = """
+                    OPEN QUESTION from your last turn: "\(openQuestion.question)"
+                    you asked it about this request: "\(openQuestion.aboutUserRequest)"
+                    if the user's new message below answers that question, bind it to THAT request — resolve "the ones", "those", "it", "yes" against it, and carry every detail of that request (especially app and service names) into any task you emit. do not bind the reply to any older request in history.
+
+                    user's new message: \(transcript)
+                    """
+                } else {
+                    effectiveUserPrompt = transcript
+                }
+
                 // Vision gate: decide whether this turn needs to see the screen.
                 // `.always` (or an unconfigured Cerebras key) keeps the original
                 // always-capture behavior; otherwise a fast Cerebras text-only
@@ -1467,13 +1631,13 @@ final class CompanionManager: ObservableObject {
                         run, .plan, "conversation history sent to claude (\(historyForAPI.count) exchange(s))",
                         body: conversationHistoryDump.isEmpty ? "(none)" : conversationHistoryDump
                     )
-                    PerchRunLog.appendBlock(run, .plan, "user prompt sent to claude", body: transcript)
+                    PerchRunLog.appendBlock(run, .plan, "user prompt sent to claude", body: effectiveUserPrompt)
 
                     let (responseText, _) = try await claudeAPI.analyzeImageStreaming(
                         images: labeledImages,
                         systemPrompt: voiceSystemPrompt,
                         conversationHistory: historyForAPI,
-                        userPrompt: transcript,
+                        userPrompt: effectiveUserPrompt,
                         // Tags this turn as a billable "message" (voice or text) so it
                         // counts toward the free-tier cap at the Worker.
                         feature: "companion",
@@ -1500,12 +1664,12 @@ final class CompanionManager: ObservableObject {
                         run, .plan, "conversation history sent to cerebras (\(historyForAPI.count) exchange(s))",
                         body: conversationHistoryDump.isEmpty ? "(none)" : conversationHistoryDump
                     )
-                    PerchRunLog.appendBlock(run, .plan, "user prompt sent to cerebras", body: transcript)
+                    PerchRunLog.appendBlock(run, .plan, "user prompt sent to cerebras", body: effectiveUserPrompt)
 
                     let (responseText, _) = try await CerebrasClient.shared.respondTextOnlyStreaming(
                         systemPrompt: textOnlySystemPrompt,
                         conversationHistory: historyForAPI,
-                        userPrompt: transcript,
+                        userPrompt: effectiveUserPrompt,
                         onTextChunk: { [weak self] accumulated in
                             // Stream into the typed-chat bubble for typed turns; voice
                             // stays spinner-only until TTS plays.
@@ -1638,6 +1802,15 @@ final class CompanionManager: ObservableObject {
                 // Save this exchange to conversation history (with the point tag
                 // stripped so it doesn't confuse future context)
                 recordExchange(userTranscript: transcript, assistantResponse: spokenText)
+                // An ANSWER-lane reply that itself asks a question ("i can do
+                // that, are you sure though?") carries no [CLARIFY] tag, so the
+                // intent gate leaves no trace of it — record it as the open
+                // question the NEXT turn must bind its reply to.
+                if spokenText.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") {
+                    pendingOpenQuestion = OpenAssistantQuestion(
+                        question: spokenText, aboutUserRequest: transcript
+                    )
+                }
                 print("🧠 Conversation history: \(conversationHistory.count) exchanges")
                 PerchRunLog.append(run, .state, "conversation history now \(conversationHistory.count) exchange(s)")
 
@@ -1710,7 +1883,14 @@ final class CompanionManager: ObservableObject {
         PerchRunLog.append(runForBackgroundTask, .action, "handing task to browser subagent: \(task)")
         Task { await browserSubagentManager.startTask(task, runDocument: runForBackgroundTask) }
 
-        recordExchange(userTranscript: transcript, assistantResponse: spokenConfirmation)
+        // History records the FULL task, not just the vague "on it!" — a later
+        // elliptical turn must be able to see WHAT was started (and, via the
+        // closure note recorded on completion/failure, that it ended). The bubble
+        // and TTS below still use the short confirmation alone.
+        recordExchange(
+            userTranscript: transcript,
+            assistantResponse: spokenConfirmation + " [started background task: \(task)]"
+        )
         // Typed turns land the confirmation in the bubble; voice speaks it.
         if inputKind == "typed" {
             finalizeStreamingAssistant(finalText: spokenConfirmation)
@@ -1774,9 +1954,13 @@ final class CompanionManager: ObservableObject {
     /// Handles the clarify lane: the request was ambiguous, so Perch speaks one
     /// short question and waits for the user's answer. Nothing is done and nothing
     /// is pointed at — the user's reply re-enters the same pipeline with this
-    /// question in conversation history for context.
+    /// question in conversation history for context AND anchored as the open
+    /// question the next turn's reply binds to.
     private func handleClarifyQuestion(question: String, transcript: String, inputKind: String) async {
         recordExchange(userTranscript: transcript, assistantResponse: question)
+        pendingOpenQuestion = OpenAssistantQuestion(
+            question: question, aboutUserRequest: transcript
+        )
         // Typed turns land the question in the bubble; the user's next typed reply
         // re-enters the pipeline with it in history. Voice speaks the question.
         if inputKind == "typed" {
@@ -1800,6 +1984,21 @@ final class CompanionManager: ObservableObject {
         if conversationHistory.count > 10 {
             conversationHistory.removeFirst(conversationHistory.count - 10)
         }
+    }
+
+    /// Marks a background task as CLOSED in conversation history (never spoken).
+    /// Pairs with the `[started background task: …]` note recorded at start, so
+    /// the model reads finished/failed tasks as closed business instead of live
+    /// threads an elliptical follow-up could bind to.
+    private func recordBackgroundTaskClosure(
+        taskDescription: String, didSucceed: Bool, summary: String
+    ) {
+        recordExchange(
+            userTranscript: "(no user message — background task update)",
+            assistantResponse:
+                "[background task \(didSucceed ? "done" : "failed"): "
+                + "\(taskDescription) — \(summary)]"
+        )
     }
 
     // MARK: - Typed-chat thread (UI-only bubbles)
@@ -1950,6 +2149,14 @@ final class CompanionManager: ObservableObject {
             finalUrl: finishedRun.finalUrl,
             didSucceed: true,
             deliverableLabel: finishedRun.deliverableLabel
+        )
+        // Close the task in CONVERSATION history too — without this the model
+        // only ever sees "on it!" and treats the old task as live forever, which
+        // is how an elliptical follow-up got bound to a long-finished task.
+        recordBackgroundTaskClosure(
+            taskDescription: finishedRun.taskDescription,
+            didSucceed: true,
+            summary: completionMessage
         )
 
         // Show the result bubble and schedule it to auto-dismiss.

@@ -453,9 +453,12 @@ struct NotchHomeView: View {
         companionManager.notchAlertCoordinator.currentAlert != nil
     }
 
-    /// Either open-notch surface (alert or connect prompt) is occupying the center.
+    /// Any open-notch surface (agent confirmation, alert, or connect prompt) is
+    /// occupying the center.
     private var isNotchCenterSurfaceVisible: Bool {
-        isNotchAlertVisible || currentConnectionOffer != nil
+        isNotchAlertVisible
+            || currentConnectionOffer != nil
+            || companionManager.pendingAgentConfirmation != nil
     }
 
     var body: some View {
@@ -527,9 +530,31 @@ struct NotchHomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay {
-            // A connect prompt is a blocking gate the running task depends on, so it
-            // takes the center over a (lower-priority) notch alert when both are present.
-            if let connectionOffer = currentConnectionOffer {
+            // Surface priority, most time-critical first: an agent confirmation is
+            // auto-denied by the sidecar after ~120s, so it outranks the connect
+            // prompt (which blocks indefinitely) and the (lowest) notch alert.
+            if let agentConfirmation = companionManager.pendingAgentConfirmation {
+                GeometryReader { geometry in
+                    let confirmationBandWidth = max(
+                        0,
+                        geometry.size.width - albumArtReservedWidth - trailingReservedWidth
+                    )
+                    NotchAgentConfirmationContentView(
+                        confirmation: agentConfirmation,
+                        onApprove: {
+                            companionManager.respondToAgentConfirmation(approved: true)
+                        },
+                        onDeny: {
+                            companionManager.respondToAgentConfirmation(approved: false)
+                        }
+                    )
+                    .frame(width: confirmationBandWidth, height: geometry.size.height)
+                    .position(
+                        x: geometry.size.width / 2,
+                        y: geometry.size.height / 2
+                    )
+                }
+            } else if let connectionOffer = currentConnectionOffer {
                 GeometryReader { geometry in
                     let offerBandWidth = max(
                         0,
@@ -1068,5 +1093,80 @@ struct NotchConnectionOfferContentView: View {
         case .failed:
             return "No changes made — I'll handle it in the browser instead."
         }
+    }
+}
+
+/// The center-band card for a background agent's confirmation gate — the sidecar
+/// is blocked awaiting the user's Approve/Deny (and auto-denies after ~120s, so
+/// this ask must actually be seen; the notch auto-opens when it lands). Modeled
+/// on `NotchConnectionOfferContentView` above; the description can be a full
+/// sentence ("Calendar can't be controlled by script… Allow Perch to control it
+/// visibly on your screen?") so it gets two lines.
+struct NotchAgentConfirmationContentView: View {
+    let confirmation: PendingBrowserSubagentConfirmation
+    var onApprove: () -> Void
+    var onDeny: () -> Void
+
+    @ObservedObject private var musicManager = MusicManager.shared
+
+    private var accentColor: Color {
+        // A destructive-tier ask gets a warning tint; external/unclassified rides
+        // the ambient accent like every other notch surface.
+        confirmation.tier == "destructive"
+            ? Color(red: 0.95, green: 0.62, blue: 0.18)
+            : NotchAccentColor.fromMusicAccent(musicManager.avgColor)
+    }
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 6) {
+            Text("Perch needs your OK")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity)
+
+            Text(confirmation.description)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Color(white: 0.72))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: 8) {
+                Button(action: onDeny) {
+                    Text("Deny")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color(white: 0.82))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color(white: 0.22)))
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .onHover { isHovering in
+                    if isHovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+
+                Button(action: onApprove) {
+                    Text("Approve")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(NotchAccentColor.labelColor(on: accentColor))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(accentColor))
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .onHover { isHovering in
+                    if isHovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
