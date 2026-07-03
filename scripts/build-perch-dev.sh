@@ -7,10 +7,10 @@ set -euo pipefail
 # repo's on-disk state, wiring the browser sidecar to the SIBLING BACKEND
 # WORKTREE.
 #
-# This is the post-Big-Split variant that lives in the `dev-perch/app` worktree
-# (which contains only notch/, no browser-subagent/). It resolves the sidecar
-# from the sibling backend worktree, preferring `backend-dev-work` (the active
-# dev-work branch) over `backend`.
+# This is the post-Big-Split variant for the app checkouts (which contain no
+# browser-subagent/). It resolves the sidecar from the sibling backend checkout:
+# `../backend` when run from dev/app, `../beta-backend-perch` when run from
+# beta/beta-app-perch (see Perch_Project/.claude/perch-paths.sh for the map).
 #
 # WHY RELEASE (not Debug): a Debug build splits into a launcher stub that
 # dlopen()s the real code, so macOS TCC attributes Accessibility / Screen
@@ -78,22 +78,20 @@ plist_set() { /usr/libexec/PlistBuddy -c "Set :$1 $2" "${PLIST}" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :$1 string $2" "${PLIST}"; }
 plist_set PerchRepoRoot              "${REPO_DIR}"
 
-# Resolve the sidecar dir. The app worktree (dev-perch/app) has no
-# browser-subagent/ — it lives in a sibling backend worktree. Prefer
-# `backend-dev-work` (the active dev-work branch the user builds against), then
-# fall back to `backend`, then an in-repo copy if one ever exists.
-if [ -d "${REPO_DIR}/../beta-backend-perch/browser-subagent" ]; then
-    SIDECAR_DIR="$(cd "${REPO_DIR}/../beta-backend-perch/browser-subagent" && pwd)"
-elif [ -d "${REPO_DIR}/../backend-dev-work/browser-subagent" ]; then
-    SIDECAR_DIR="$(cd "${REPO_DIR}/../backend-dev-work/browser-subagent" && pwd)"
-elif [ -d "${REPO_DIR}/../backend/browser-subagent" ]; then
+# Resolve the sidecar dir. The app checkout has no browser-subagent/ — it lives
+# in the sibling backend checkout: `../backend` from dev/app (dev worktree pair),
+# `../beta-backend-perch` from beta/beta-app-perch (beta pair). Prefer the
+# sibling from the SAME pair so a dev build runs the dev sidecar.
+if [ -d "${REPO_DIR}/../backend/browser-subagent" ]; then
     SIDECAR_DIR="$(cd "${REPO_DIR}/../backend/browser-subagent" && pwd)"
+elif [ -d "${REPO_DIR}/../beta-backend-perch/browser-subagent" ]; then
+    SIDECAR_DIR="$(cd "${REPO_DIR}/../beta-backend-perch/browser-subagent" && pwd)"
 elif [ -d "${REPO_DIR}/browser-subagent" ]; then
     SIDECAR_DIR="${REPO_DIR}/browser-subagent"
 else
-    echo "⚠️  browser-subagent/ not found in a sibling backend worktree;"
+    echo "⚠️  browser-subagent/ not found in a sibling backend checkout;"
     echo "    the autonomous agent will be unavailable in this dev build."
-    SIDECAR_DIR="${REPO_DIR}/../backend-dev-work/browser-subagent"   # dead path → agent cleanly unavailable
+    SIDECAR_DIR="${REPO_DIR}/../backend/browser-subagent"   # dead path → agent cleanly unavailable
 fi
 plist_set BrowserSubagentPath        "${SIDECAR_DIR}"
 plist_set BrowserSubagentSocketPath  "${REPO_DIR}/support/ipc/subagent.sock"
