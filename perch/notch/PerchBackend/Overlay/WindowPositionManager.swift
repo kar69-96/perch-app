@@ -148,32 +148,27 @@ class WindowPositionManager {
     }
 
     // MARK: Direct-capture ("bypass the private window picker") warm-up.
-    // macOS 15/26 shows a SECOND, separate consent the first time an app captures the
-    // screen *directly* (via SCScreenshotManager) instead of the system picker. It only
-    // fires once the classic Screen Recording grant is live — i.e. after the
-    // post-onboarding relaunch. We surface it deliberately at startup right after
-    // onboarding (a throwaway capture) so the user meets it in-context, primed by the
-    // onboarding copy, instead of being ambushed on some later query.
-    private static let didScreenCaptureDirectAccessWarmupUserDefaultsKey = "app.perch.didScreenCaptureDirectAccessWarmup"
+    // macOS 15/26 shows a SECOND, separate consent when an app captures the screen
+    // *directly* (via SCScreenshotManager) instead of the system picker — and the OS
+    // re-requests it on its own schedule (roughly monthly via "Allow For One Month",
+    // and after the app binary changes, e.g. an update). It only fires once the
+    // classic Screen Recording grant is live — i.e. after the post-onboarding
+    // relaunch. We surface it deliberately at startup (a throwaway capture) so the
+    // user meets it in-context, primed by the onboarding copy, instead of being
+    // ambushed mid-conversation on a later query.
 
-    /// True the FIRST time the classic Screen Recording grant is live in this process
-    /// and the direct-access warm-up hasn't run yet — regardless of HOW the grant was
-    /// obtained (onboarding, System Settings, or a re-grant after a signing change).
+    /// True whenever the classic Screen Recording grant is live — regardless of HOW
+    /// the grant was obtained (onboarding, System Settings, or a re-grant after a
+    /// signing change).
     ///
-    /// This warm-up used to also require a "needed" flag that only onboarding's
-    /// post-grant relaunch path set. Any user who enabled Screen Recording another way
-    /// (e.g. directly in System Settings) therefore never got the in-context warm-up,
-    /// and instead met macOS 15/26's separate "bypass the private window picker" consent
-    /// on their first real query. Keying purely off "grant is live and warm-up not done"
-    /// surfaces that consent at startup for every path into the grant.
+    /// The warm-up used to run ONCE per install (a UserDefaults flag). That left a
+    /// gap: macOS re-requests the bypass consent periodically and after updates, and
+    /// with the flag already consumed the re-consent landed in the middle of the
+    /// user's next screen-dependent query. The warm-up capture is a one-frame 320px
+    /// throwaway (~free) and is silent whenever no consent is due, so it now runs on
+    /// EVERY launch — whenever macOS decides re-consent is due, it lands at startup.
     static func shouldRunScreenCaptureDirectAccessWarmup() -> Bool {
-        let alreadyDone = UserDefaults.standard.bool(forKey: didScreenCaptureDirectAccessWarmupUserDefaultsKey)
-        return !alreadyDone && CGPreflightScreenCaptureAccess()
-    }
-
-    /// Marks the direct-access warm-up as done so it runs at most once.
-    static func markScreenCaptureDirectAccessWarmupDone() {
-        UserDefaults.standard.set(true, forKey: didScreenCaptureDirectAccessWarmupUserDefaultsKey)
+        CGPreflightScreenCaptureAccess()
     }
 
     /// Prompts the system dialog for Screen Recording permission.

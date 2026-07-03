@@ -28,8 +28,8 @@ enum PerchDefaultsMigration {
          "app.perch.screenRecordingRequestedDuringOnboarding"),
         ("com.learningbuddy.didAutoRelaunchAfterOnboardingForScreenRecording",
          "app.perch.didAutoRelaunchAfterOnboardingForScreenRecording"),
-        ("com.learningbuddy.didScreenCaptureDirectAccessWarmup",
-         "app.perch.didScreenCaptureDirectAccessWarmup"),
+        // didScreenCaptureDirectAccessWarmup was dropped from this table when the
+        // direct-access warm-up became per-launch (no persisted flag anymore).
     ]
 
     /// Idempotent. Safe to call on every launch; does work only once.

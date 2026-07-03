@@ -605,12 +605,12 @@ final class CompanionManager: ObservableObject {
         // well before the onboarding demo fires at ~40s into the video.
         _ = claudeAPI
 
-        // On the first launch where the Screen Recording grant is live — however it was
+        // On EVERY launch where the Screen Recording grant is live — however it was
         // obtained (onboarding, System Settings, or a re-grant after a signing change) —
-        // do ONE throwaway direct capture. This surfaces macOS 15/26's separate "bypass
-        // the private window picker" consent immediately and in-context at startup,
-        // instead of ambushing the user on a later query. Runs at most once; the result
-        // is discarded.
+        // do one throwaway direct capture. This surfaces macOS 15/26's separate "bypass
+        // the private window picker" consent immediately and in-context at startup —
+        // including the OS's periodic/post-update re-consents — instead of ambushing
+        // the user mid-query. Silent when no consent is due; the result is discarded.
         maybeRunScreenCaptureDirectAccessWarmup()
 
         // If the user already completed onboarding AND all permissions are
@@ -2311,7 +2311,6 @@ final class CompanionManager: ObservableObject {
     /// pending and the classic Screen Recording grant is live in this process.
     private func maybeRunScreenCaptureDirectAccessWarmup() {
         guard WindowPositionManager.shouldRunScreenCaptureDirectAccessWarmup() else { return }
-        WindowPositionManager.markScreenCaptureDirectAccessWarmupDone()
         Task { @MainActor [weak self] in
             guard self != nil else { return }
             // A brief settle so the window server / overlays are up before macOS shows
