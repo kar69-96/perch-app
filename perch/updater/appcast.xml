@@ -4,6 +4,16 @@
         <title>Perch Updates</title>
         <link>https://github.com/Useperch/perch-app</link>
         <item>
+            <title>2.7.8</title>
+            <pubDate>Fri, 03 Jul 2026 17:15:28 +0000</pubDate>
+            <link>https://github.com/Useperch/perch-app/releases/tag/v2.7.8</link>
+            <sparkle:version>276</sparkle:version>
+            <sparkle:shortVersionString>2.7.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<p>See the <a href="https://github.com/Useperch/perch-app/releases/tag/v2.7.8">release notes</a> for details.</p>]]></description>
+            <enclosure url="https://github.com/Useperch/perch-app/releases/download/v2.7.8/notch.dmg" length="17704256" type="application/octet-stream" sparkle:edSignature="StM7ZRGkVjhTDPnojApWa2e8dIs2q1Bh3Ci0uBEpoXJUmnQfoGpKCF95BIYdgEYxspvGR/Pz72+t1FQ5w65fDQ=="/>
+        </item>
+        <item>
             <title>2.7.7</title>
             <pubDate>Fri, 03 Jul 2026 16:39:10 +0000</pubDate>
             <link>https://github.com/Useperch/perch-app/releases/tag/v2.7.7</link>
