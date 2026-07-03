@@ -11,7 +11,7 @@ class StatusMenu: NSMenu {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Notch")
+            button.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Perch")
             button.action = #selector(showMenu)
         }
         

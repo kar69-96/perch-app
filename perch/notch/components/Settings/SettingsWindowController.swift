@@ -40,7 +40,7 @@ class SettingsWindowController: NSWindowController {
     private func setupWindow() {
         guard let window = window else { return }
         
-        window.title = "Notch Settings"
+        window.title = "Perch Settings"
         window.titlebarAppearsTransparent = false
         window.titleVisibility = .visible
         window.toolbarStyle = .unified
@@ -55,7 +55,7 @@ class SettingsWindowController: NSWindowController {
         
         // Configure window to be a standard document-style window
         window.isRestorable = true
-        window.identifier = NSUserInterfaceItemIdentifier("NotchSettingsWindow")
+        window.identifier = NSUserInterfaceItemIdentifier("PerchSettingsWindow")
         
         // Create the SwiftUI content
         let settingsView = SettingsView(updaterController: updaterController)

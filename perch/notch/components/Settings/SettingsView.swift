@@ -842,7 +842,24 @@ struct About: View {
     let updaterController: SPUStandardUpdaterController
     @Environment(\.openWindow) var openWindow
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
+            // Branded header with real logo
+            VStack(spacing: 6) {
+                Image("perch-owl")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 56, height: 56)
+                    .padding(8)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.06))
+                    )
+                Text("Perch")
+                    .font(.system(size: 20, weight: .semibold))
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
             Form {
                 Section {
                     HStack {
@@ -1150,8 +1167,6 @@ struct Appearance: View {
     @Default(.customVisualizers) var customVisualizers
     @Default(.selectedVisualizer) var selectedVisualizer
 
-    let icons: [String] = ["logo2"]
-    @State private var selectedIcon: String = "logo2"
     @State private var selectedListVisualizer: CustomVisualizer? = nil
     @State private var isPresented: Bool = false
     @State private var name: String = ""
@@ -1403,8 +1418,8 @@ struct Advanced: View {
     
     @State private var customAccentColor: Color = .accentColor
     @State private var selectedPresetColor: PresetAccentColor? = nil
-    let icons: [String] = ["logo2"]
-    @State private var selectedIcon: String = "logo2"
+    let icons: [String] = ["perch-icon"]
+    @State private var selectedIcon: String = "perch-icon"
     
     // macOS accent colors
     enum PresetAccentColor: String, CaseIterable, Identifiable {
@@ -1561,15 +1576,17 @@ struct Advanced: View {
                             Image(icon)
                                 .resizable()
                                 .frame(width: 80, height: 80)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 20, style: .circular)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                                         .strokeBorder(
-                                            icon == selectedIcon ? Color.effectiveAccent : .clear,
-                                            lineWidth: 2.5
+                                            icon == selectedIcon ? Color.effectiveAccent : Color.white.opacity(0.2),
+                                            lineWidth: icon == selectedIcon ? 3 : 1
                                         )
                                 )
+                                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
 
-                            Text("Default")
+                            Text("Perch")
                                 .fontWeight(.medium)
                                 .font(.caption)
                                 .foregroundStyle(icon == selectedIcon ? .white : .secondary)

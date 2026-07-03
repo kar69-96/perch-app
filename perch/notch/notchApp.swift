@@ -29,7 +29,7 @@ struct DynamicNotchApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("notch", systemImage: "sparkle", isInserted: $showMenuBarIcon) {
+        MenuBarExtra("Perch", systemImage: "sparkle", isInserted: $showMenuBarIcon) {
             // Window presentation (not the default native menu) so the permission rows
             // can render as real switch toggles instead of checkmark menu items.
             PerchMenuBarContent(
