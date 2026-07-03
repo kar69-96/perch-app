@@ -441,6 +441,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
 
+        // Dogfood auto-login: if support/dev-autologin.json is present, mark onboarding
+        // + the skippable screen-content permission complete BEFORE the firstLaunch gate
+        // below reads them. Runs AFTER ViewCoordinator's fresh-install reset (its static
+        // init), so the flags stick. No-op without the gitignored config.
+        PerchDevBootstrap.applyOnboardingAndPermissionSkips()
+
         // Legacy key migration + fresh-install preference reset already ran inside
         // ViewCoordinator.shared's static initializer (before any @AppStorage read).
 
@@ -855,5 +861,95 @@ extension CGRect: @retroactive Hashable {
 
     public static func == (lhs: CGRect, rhs: CGRect) -> Bool {
         return lhs.origin == rhs.origin && lhs.size == rhs.size
+    }
+}
+
+
+// MARK: - Dogfood auto-login (dev only)
+
+/// A DEV-ONLY launch shortcut so a freshly (re)built local dogfood app lands
+/// straight in the main UI — logged into the developer's account, with no
+/// onboarding and no permission screens.
+///
+/// Everything is gated behind a **gitignored** `support/dev-autologin.json`
+/// (`enabled: true`). Without that file this is a complete no-op, so it is safe
+/// to leave compiled into any build — and it never ships, because the config is
+/// gitignored and `Useperch/perch-app` is a PUBLIC repo (no secret lives in code
+/// here; the email/token live only in the ignored config on the machine).
+///
+/// Note: the live OS TCC grants (Accessibility / Screen Recording / Microphone)
+/// cannot be injected from a file — they must be granted once in System Settings.
+/// They persist for the stable-signed "Perch Dev" bundle across rebuilds, so this
+/// only needs to skip the onboarding *screens*, not grant the capabilities.
+enum PerchDevBootstrap {
+
+    private struct Config: Decodable {
+        var enabled: Bool
+        var installId: String?
+        var email: String?
+        var emailVerified: Bool?
+        var installToken: String?
+        var markScreenContentPermission: Bool?
+    }
+
+    private static func loadConfig() -> Config? {
+        let url = PerchSupportPaths.file("dev-autologin.json")
+        guard let data = try? Data(contentsOf: url),
+              let config = try? JSONDecoder().decode(Config.self, from: data),
+              config.enabled else { return nil }
+        return config
+    }
+
+    /// Patch the on-disk identity so the app boots logged in. Merges the account
+    /// email + verified flag into the EXISTING identity file (preserving installId,
+    /// install token, and entitlement/usage of the current registered install); if no
+    /// identity file exists yet, writes a minimal verified one. Uses JSONSerialization
+    /// so unknown fields (e.g. `entitlement`) are preserved verbatim. No-op without the
+    /// gitignored config. Called from PerchInstallIdentity.loadOrMintIdentity().
+    static func seedIdentityIfConfigured(at identityURL: URL) {
+        guard let config = loadConfig() else { return }
+
+        var dict: [String: Any] = [:]
+        if let data = try? Data(contentsOf: identityURL),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            dict = existing
+        }
+        if (dict["installId"] as? String)?.isEmpty ?? true {
+            let seededId = (config.installId?.isEmpty == false ? config.installId! : UUID().uuidString)
+            dict["installId"] = seededId.lowercased()
+        }
+        if dict["tracingEnabled"] == nil { dict["tracingEnabled"] = true }
+
+        let email = (config.email?.isEmpty == false) ? config.email : (dict["email"] as? String)
+        if let email, !email.isEmpty {
+            dict["email"] = email
+            dict["emailVerified"] = config.emailVerified ?? true
+        }
+        if let token = config.installToken, !token.isEmpty {
+            dict["installToken"] = token
+        }
+
+        guard JSONSerialization.isValidJSONObject(dict),
+              let out = try? JSONSerialization.data(
+                withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]) else { return }
+        try? FileManager.default.createDirectory(
+            at: identityURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? out.write(to: identityURL, options: .atomic)
+        NSLog("[PerchDevBootstrap] dev auto-login: identity seeded (email attached).")
+    }
+
+    /// Mark onboarding + the one persisted permission gate complete so the launch
+    /// flow skips straight to the main UI. No-op without the gitignored config.
+    static func applyOnboardingAndPermissionSkips() {
+        guard let config = loadConfig() else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(false, forKey: "firstLaunch")
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+        defaults.set(true, forKey: "hasSubmittedEmail")
+        defaults.removeObject(forKey: "perch.onboarding.resumeStep")
+        if config.markScreenContentPermission ?? true {
+            defaults.set(true, forKey: "hasScreenContentPermission")
+        }
+        NSLog("[PerchDevBootstrap] dev auto-login: onboarding + screen-content permission skipped.")
     }
 }

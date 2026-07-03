@@ -146,6 +146,13 @@ final class PerchInstallIdentity: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 15
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
+        // Proof of possession: a re-register rotates this install's token, so
+        // present the current one when we have it. The Worker rejects a
+        // mismatched token (401), which stops anyone who merely learned our
+        // install UUID from hijacking the install by re-registering it.
+        if let currentInstallToken = installToken, !currentInstallToken.isEmpty {
+            request.setValue(currentInstallToken, forHTTPHeaderField: "X-Perch-Install-Token")
+        }
 
         do {
             let (data, response) = try await Self.registrationSession.data(for: request)
@@ -366,6 +373,11 @@ final class PerchInstallIdentity: ObservableObject {
     }()
 
     private static func loadOrMintIdentity() -> PersistedIdentity {
+        // Dogfood auto-login: if a gitignored support/dev-autologin.json is present,
+        // seed/patch the identity file here — the single load path — so .shared always
+        // sees the seeded account regardless of when it's first touched. No-op without
+        // the config file. (The config is gitignored; this repo is public.)
+        PerchDevBootstrap.seedIdentityIfConfigured(at: identityFileURL)
         if let data = try? Data(contentsOf: identityFileURL),
            let decoded = try? JSONDecoder().decode(PersistedIdentity.self, from: data) {
             return decoded
