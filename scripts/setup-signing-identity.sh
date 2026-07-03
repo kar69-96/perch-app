@@ -23,15 +23,52 @@ set -euo pipefail
 # Run once:  ./scripts/setup-signing-identity.sh
 # Then:      ./scripts/build-perch.sh   (uses the identity automatically)
 #
+# IDEMPOTENT: if the identity already exists and can sign, this script reuses it
+# and exits — regenerating the cert would change the Designated Requirement and
+# reset every TCC grant on every machine that trusts the old cert. Pass
+# PERCH_FORCE_NEW_IDENTITY=1 to deliberately regenerate (you will have to
+# re-grant Accessibility / Screen Recording / Microphone afterwards).
+#
 # After the FIRST build signed with this identity, re-grant the permissions once.
 # They will then survive all subsequent rebuilds.
 # =============================================================================
 
 CN="Perch Self Signed"
 KCNAME="perchdev.keychain"
+KEYCHAIN_DB="$HOME/Library/Keychains/perchdev.keychain-db"
 PW="${PERCH_SIGN_KEYCHAIN_PASSWORD:-perch}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+sign_test() {
+    local testbin="$WORK/signtest"
+    printf '#!/bin/sh\necho hi\n' > "$testbin"; chmod +x "$testbin"
+    codesign --force --sign "${CN}" --timestamp=none "$testbin" >/dev/null 2>&1
+}
+
+# ── Reuse the existing identity if it still works ────────────────────────────
+if [ "${PERCH_FORCE_NEW_IDENTITY:-0}" != "1" ] && [ -f "$KEYCHAIN_DB" ] \
+    && security find-certificate -c "${CN}" "$KEYCHAIN_DB" >/dev/null 2>&1; then
+    security unlock-keychain -p "${PW}" "${KCNAME}" 2>/dev/null || true
+    if sign_test; then
+        echo "✅ Existing identity '${CN}' found and usable — reusing it."
+        echo "   (Regenerating would reset all TCC permission grants. If you"
+        echo "    really need a fresh cert, run with PERCH_FORCE_NEW_IDENTITY=1.)"
+        exit 0
+    fi
+    echo "❌ Identity '${CN}' exists in ${KEYCHAIN_DB} but cannot sign."
+    echo "   Check PERCH_SIGN_KEYCHAIN_PASSWORD (keychain may be locked), or run"
+    echo "   with PERCH_FORCE_NEW_IDENTITY=1 to regenerate — note that ALL TCC"
+    echo "   grants (Accessibility, Screen Recording, Mic) will need re-granting."
+    exit 1
+fi
+
+if [ -f "$KEYCHAIN_DB" ]; then
+    echo "⚠️  PERCH_FORCE_NEW_IDENTITY=1 — replacing the existing identity."
+    echo "   ALL TCC permission grants tied to the old cert will stop validating;"
+    echo "   remove Perch from each Privacy & Security list and re-grant after the"
+    echo "   next build (or: tccutil reset Accessibility app.perch.notch)."
+fi
 
 echo "▶︎ Generating self-signed code-signing certificate…"
 openssl req -x509 -newkey rsa:2048 -keyout "$WORK/key.pem" -out "$WORK/cert.pem" \
@@ -59,12 +96,13 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${PW}" "$
 
 echo "▶︎ Adding keychain to the user search list (keeping existing)…"
 EXISTING=$(security list-keychains -d user | sed 's/[",]//g' | xargs)
-security list-keychains -d user -s ${EXISTING} "${KCNAME}"
+case " ${EXISTING} " in
+    *"${KEYCHAIN_DB}"*) ;;  # already in the search list
+    *) security list-keychains -d user -s ${EXISTING} "${KCNAME}" ;;
+esac
 
 echo "▶︎ Verifying codesign can sign with it…"
-TESTBIN="$WORK/signtest"
-printf '#!/bin/sh\necho hi\n' > "$TESTBIN"; chmod +x "$TESTBIN"
-if codesign --force --sign "${CN}" --timestamp=none "$TESTBIN" >/dev/null 2>&1; then
+if sign_test; then
     echo "✅ Signing identity '${CN}' is ready. Run ./scripts/build-perch.sh to build."
 else
     echo "❌ Test sign failed — identity not usable."

@@ -164,10 +164,12 @@ if [ -f "$KEYCHAIN" ] && security find-certificate -c "$SIGN_IDENTITY" "$KEYCHAI
     codesign --force --deep --sign "$SIGN_IDENTITY" --keychain "$KEYCHAIN" \
         --entitlements "$ENTITLEMENTS" --timestamp=none "$APP_COPY"
 else
-    echo "   ⚠️  '$SIGN_IDENTITY' not found — ad-hoc fallback. DO NOT publish this"
-    echo "      DMG: users' hotkey/TCC grants won't persist across updates."
-    echo "      Run ./scripts/setup-signing-identity.sh and re-package."
-    codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" --timestamp=none "$APP_COPY"
+    echo "❌ Signing identity '$SIGN_IDENTITY' not found in $KEYCHAIN."
+    echo "   Refusing to package: an ad-hoc signature has no stable Designated"
+    echo "   Requirement, so every user's Accessibility/Screen Recording/Mic"
+    echo "   grants would reset on this update (and on every rebuild)."
+    echo "   Run ./scripts/setup-signing-identity.sh, then re-run this script."
+    exit 1
 fi
 codesign --verify --deep --strict "$APP_COPY" && echo "   signature verifies"
 
