@@ -143,9 +143,10 @@ class ViewCoordinator: ObservableObject {
             forName: Notification.Name.accessibilityAuthorizationChanged,
             object: nil,
             queue: .main
-        ) { _ in
+        ) { note in
             Task { @MainActor in
-                if Defaults[.hudReplacement] {
+                let granted = note.userInfo?["granted"] as? Bool ?? false
+                if granted && Defaults[.hudReplacement] {
                     await MediaKeyInterceptor.shared.start(promptIfNeeded: false)
                 }
             }
@@ -168,7 +169,11 @@ class ViewCoordinator: ObservableObject {
                             if granted {
                                 await MediaKeyInterceptor.shared.start()
                             } else {
-                                Defaults[.hudReplacement] = false
+                                // A false answer here can be transient (stale TCC entry,
+                                // helper race) — never rewrite the user's setting off it.
+                                // Keep polling; the accessibilityAuthorizationChanged
+                                // observer starts the interceptor once the grant lands.
+                                XPCHelperClient.shared.startMonitoringAccessibilityAuthorization()
                             }
                         }
                     } else {
@@ -185,10 +190,14 @@ class ViewCoordinator: ObservableObject {
 
             if Defaults[.hudReplacement] {
                 let authorized = await XPCHelperClient.shared.isAccessibilityAuthorized()
-                if !authorized {
-                    Defaults[.hudReplacement] = false
-                } else {
+                if authorized {
                     await MediaKeyInterceptor.shared.start(promptIfNeeded: false)
+                } else {
+                    // Don't disable the user's HUD setting off a launch-time false
+                    // negative (stale TCC entry, helper not warm yet). Poll instead;
+                    // the accessibilityAuthorizationChanged observer starts the
+                    // interceptor as soon as the grant validates.
+                    XPCHelperClient.shared.startMonitoringAccessibilityAuthorization()
                 }
             }
         }
