@@ -49,8 +49,9 @@ struct ExpandedItem {
 @MainActor
 class ViewCoordinator: ObservableObject {
     static let shared: ViewCoordinator = {
-        // Must run before any @AppStorage / UserDefaults reads so a replaced beta
-        // build does not inherit firstLaunch=false from a prior install.
+        // Must run before any @AppStorage / UserDefaults reads so a fresh install
+        // at a new location starts at true onboarding. An in-place update keeps the
+        // user's state (see PerchFreshInstallDetector — location-based, not version).
         PerchFreshInstallDetector.resetPreferencesIfFreshInstall()
         PerchDefaultsMigration.runIfNeeded()
         return ViewCoordinator()

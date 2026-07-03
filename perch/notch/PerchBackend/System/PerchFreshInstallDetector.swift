@@ -2,12 +2,18 @@
 //  PerchFreshInstallDetector.swift
 //  Perch
 //
-//  Replacing Perch.app (DMG download, drag-to-Applications, Sparkle update) does
-//  not clear ~/Library/Preferences/<bundle-id>.plist. Beta testers expect a true
-//  first-launch experience each time they install a new copy. This compares a
-//  fingerprint of the on-disk app bundle against a tiny sidecar plist that
-//  survives preference wipes; when the binary changes, we drop the entire
-//  UserDefaults domain (equivalent to deleting app.perch.notch.plist).
+//  A genuinely fresh install (a new copy dragged in at a new location, or the
+//  very first launch on this machine) should start at true onboarding. But an
+//  in-place UPGRADE — a Sparkle auto-update, or re-dragging a new DMG over the
+//  existing /Applications/Perch.app — must NOT: the user already onboarded and
+//  granted permissions, and re-prompting them on every update is hostile.
+//
+//  The two are told apart by WHERE the app lives, not which version it is. We
+//  fingerprint the install by its bundle path (which an in-place update keeps
+//  identical, but a fresh copy at a new location changes) and store it in a tiny
+//  sidecar plist that survives preference wipes. Only when the path differs — or
+//  there is stale state with no prior fingerprint at all — do we drop the whole
+//  UserDefaults domain. Version/build changes alone never trigger a reset.
 //
 
 import Foundation
@@ -21,8 +27,9 @@ enum PerchFreshInstallDetector {
             .appendingPathComponent("Library/Preferences/\(installStatePlistName).plist")
     }
 
-    /// Wipes all UserDefaults for this bundle when the installed app binary is new
-    /// or replaced. Safe on every launch; no-op when the fingerprint is unchanged.
+    /// Wipes all UserDefaults for this bundle only when the app is installed at a
+    /// new location (a genuine fresh copy), never for an in-place version update.
+    /// Safe on every launch; no-op when the install location is unchanged.
     static func resetPreferencesIfFreshInstall(defaults: UserDefaults = .standard) {
         let currentFingerprint = makeInstallFingerprint()
         let storedFingerprint = readStoredFingerprint()
@@ -59,25 +66,30 @@ enum PerchFreshInstallDetector {
         print("📦 Perch preferences reset (\(reason)) — cleared \(bundleIdentifier)")
     }
 
+    /// Identifies the install by WHERE it lives. An in-place update (Sparkle, or a
+    /// new DMG dropped over the existing app) keeps this identical, so it is not a
+    /// fresh install; a new copy at a different path changes it. Deliberately does
+    /// NOT include the version, build, or binary mtime — those change on every
+    /// update and must not, by themselves, look like a reinstall.
     private static func makeInstallFingerprint() -> String {
-        let bundle = Bundle.main
-        let buildNumber = bundle.infoDictionary?["CFBundleVersion"] as? String ?? "0"
-        let shortVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-        let bundlePath = bundle.bundlePath
-
-        var executableModificationTime: TimeInterval = 0
-        if let executableURL = bundle.executableURL,
-           let attributes = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
-           let modificationDate = attributes[.modificationDate] as? Date {
-            executableModificationTime = modificationDate.timeIntervalSince1970
-        }
-
-        return "\(shortVersion)(\(buildNumber))|\(bundlePath)|\(executableModificationTime)"
+        Bundle.main.bundlePath
     }
 
     private static func readStoredFingerprint() -> String? {
-        guard let state = NSDictionary(contentsOf: installStateURL) as? [String: Any] else { return nil }
-        return state[fingerprintKey] as? String
+        guard let state = NSDictionary(contentsOf: installStateURL) as? [String: Any],
+              let raw = state[fingerprintKey] as? String else { return nil }
+        return normalizeStoredFingerprint(raw)
+    }
+
+    /// Builds up to and including v2.7.6 stored the fingerprint as
+    /// `version(build)|bundlePath|mtime`. Reduce any such legacy value to just its
+    /// bundle-path component, so upgrading FROM one of those builds — which kept the
+    /// same install location — compares equal and is not mistaken for a reinstall.
+    /// A value already in the new path-only form is returned unchanged.
+    private static func normalizeStoredFingerprint(_ stored: String) -> String {
+        let components = stored.components(separatedBy: "|")
+        guard components.count == 3 else { return stored }
+        return components[1]
     }
 
     private static func writeStoredFingerprint(_ fingerprint: String) {
