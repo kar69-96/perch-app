@@ -44,6 +44,9 @@ struct ActiveIntegrationsStrip: View {
                 .stroke(DS.Colors.notchBorder, lineWidth: 0.5)
         )
         .onAppear { store.refresh() }
+        // Cache-first: the local file drives the immediate render above; pull the
+        // Supabase-backed manifest from the Worker in the background and fold it in.
+        .task { await store.refreshFromRemote() }
     }
 
     private var pendingConnectingEntries: [ServiceCatalogEntry] {

@@ -95,6 +95,36 @@ final class ActiveIntegrationsStore: ObservableObject {
         }
     }
 
+    /// Pull this install's manifest from the Worker (`GET /composio/manifest`,
+    /// Supabase-backed) and fold it into the local cache, so the strip reflects
+    /// connections that survive a reinstall / were made on another surface.
+    /// Cache-first: the local file already drove the initial render; this updates
+    /// it in the background. Best-effort — offline, unauthorized, or "no manifest
+    /// stored yet" all leave the local file (and thus the UI) untouched.
+    func refreshFromRemote() async {
+        guard let data = await PerchInstallIdentity.shared.gatewayGet(path: "/composio/manifest")
+        else { return }
+
+        // The Worker returns `{}` when the install has no stored manifest yet. Only
+        // a real manifest (which always carries `composio_enabled`) should overwrite
+        // the local cache, so an empty remote never wipes a good local file — e.g.
+        // before the sidecar has published, or mid-rollout.
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            object["composio_enabled"] != nil
+        else { return }
+
+        do {
+            try data.write(to: manifestReader.manifestFileURL, options: .atomic)
+        } catch {
+            return
+        }
+
+        // The reader re-parses on the bumped modification date; refresh() then
+        // recomputes `connectedIntegrations` (and the computed availability props).
+        refresh()
+    }
+
     // MARK: - Connect (from the "+" dropdown)
 
     /// Begin connecting `entry`, reusing the proactive offer's connect machinery.

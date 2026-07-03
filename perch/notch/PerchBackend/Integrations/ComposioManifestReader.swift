@@ -45,7 +45,10 @@ struct ComposioManifestState: Equatable {
 
 final class ComposioManifestReader {
 
-    private let manifestFileURL: URL
+    /// The on-disk manifest this reader watches. Exposed so a remote refresh can
+    /// fold a Worker-fetched manifest into the same cache file the reader re-reads
+    /// (see `ActiveIntegrationsStore.refreshFromRemote()`).
+    let manifestFileURL: URL
 
     /// Cached parse + the file modification date it was parsed from.
     private var cachedState: ComposioManifestState = .absent
