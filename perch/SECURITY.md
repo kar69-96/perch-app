@@ -2,10 +2,20 @@
 
 ## Reporting a Vulnerability
 
-The Bored Team and community take security bugs in Boring Notch seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
+Perch and its community take security bugs seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
 
-To report a security issue, please use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/TheBoredTeam/boring.notch/security/advisories/new) tab.
+To report a security issue, please email **kreddy.2027@gmail.com** with the subject line **"Perch Security Report"** and include:
+- A description of the vulnerability
+- Steps to reproduce it
+- Potential impact
+- (Optional) a suggested fix
 
-The Bored Team will send a response indicating the next steps in handling your report. After the initial reply to your report, we will keep you informed of the progress towards a fix and full announcement, and may ask for additional information or guidance.
+We will respond to your report as quickly as possible and keep you updated on the progress towards a fix. After we've confirmed and fixed the issue, we'll credit you in the fix release notes if you'd like.
 
-Report security bugs in third-party dependencies to the person or team maintaining the package or dependency.
+## Responsible Disclosure
+
+Please do **not** publicly disclose the vulnerability until we've had time to investigate and release a fix. We ask for at least 90 days before public disclosure to allow users time to update.
+
+## Reporting Vulnerabilities in Dependencies
+
+If you find a security issue in a third-party dependency that Perch uses, please report it directly to that project's security team first, then email us with a reference to your report so we can track the fix.

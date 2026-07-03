@@ -11,9 +11,7 @@ of your display. Hold `⌃ Control + ⌥ Option` to talk, or tap **Control** twi
 
 ## Setup
 
-Paste this into your favorite AI coding agent to set this up for you:
-
-> Reference [https://raw.githubusercontent.com/Useperch/perch-app/main/SETUP.md ](https://github.com/Useperch/perch-app/blob/main/SETUP.md)to set up Perch Beta.
+For installation instructions, see **[SETUP.md](./SETUP.md)** — includes a copy-paste install for agents, a DMG download fallback, and build-from-source instructions.
 
 ## Say Hi!
 Please email with feedback (or just to say hi!): kare6625@colorado.edu

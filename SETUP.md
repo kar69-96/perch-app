@@ -89,6 +89,16 @@ If it reports a missing signing identity, run `./scripts/setup-signing-identity.
 This path needs the full **Xcode** (macOS 14.2+) — the asset catalogs need Xcode's tooling, so the
 Command Line Tools alone aren't enough.
 
+**What works in a source build:** everything you see in the official app — chat, voice,
+onboarding, the dashboard — talks to the same hosted backend out of the box (the gateway
+URL is committed). Two features are only in the official DMG:
+
+- **The autonomous browser agent** — its sidecar lives in a separate (closed) repo and is
+  bundled into official builds; a source build simply won't offer agent runs.
+- **Workflow sharing** — the committed `Info.plist` carries a placeholder client secret
+  (`YOUR_WORKFLOW_SHARE_SECRET`); the real one is injected at release-packaging time, so
+  share uploads from a source build get a 401.
+
 ---
 
 ## First launch
