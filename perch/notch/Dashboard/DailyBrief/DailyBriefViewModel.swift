@@ -88,6 +88,15 @@ final class DailyBriefViewModel: ObservableObject {
 
     // MARK: Calendar + synthesis (the "real info" path)
 
+    /// Re-run just the calendar + synthesis path (not news/comic). Called after the user
+    /// connects a missing integration from a "Connect to …" prompt, so the now-available
+    /// calendar events and email-driven catch-up / priorities load in without waiting for
+    /// the next day's rollover. The lists re-seed because an earlier empty synthesis never
+    /// marked the day as seeded (`applyDailyBrief` skips an all-empty result).
+    func refreshDayContext() {
+        Task { await loadDayContext() }
+    }
+
     /// Fetch today's real calendar + priority emails, publish the agenda, then synthesize the
     /// brief's prose from that context. The calendar renders as soon as it resolves; the prose
     /// follows once the model replies.

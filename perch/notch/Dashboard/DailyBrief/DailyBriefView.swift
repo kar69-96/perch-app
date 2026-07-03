@@ -15,6 +15,10 @@ import SwiftUI
 
 struct DailyBriefView: View {
     @StateObject private var viewModel = DailyBriefViewModel()
+    /// Knows which integrations are connected and runs the connect flow for the "Connect
+    /// to …" prompts a section shows when its integration is missing and it has nothing to
+    /// display (calendar → Google Calendar, catch-up / priorities → Gmail).
+    @StateObject private var connectCoordinator = DailyBriefConnectCoordinator()
 
     // When set, the comic is shown full-size in a dismissible lightbox over the whole page.
     // It's hosted here (not inside the news section) so the expanded view can cover the
@@ -66,11 +70,16 @@ struct DailyBriefView: View {
                     .fill(DailyBriefStyle.hairline)
                     .frame(height: 1)
 
-                DailyBriefColumns()
+                DailyBriefColumns(
+                    connectCoordinator: connectCoordinator,
+                    onConnected: { viewModel.refreshDayContext() }
+                )
 
                 DailyBriefCalendarWidget(
                     entries: viewModel.calendarEntries,
-                    isLoading: viewModel.isLoadingCalendar
+                    isLoading: viewModel.isLoadingCalendar,
+                    connectCoordinator: connectCoordinator,
+                    onConnected: { viewModel.refreshDayContext() }
                 )
 
                 DailyBriefNewsSection(

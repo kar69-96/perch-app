@@ -14,27 +14,54 @@ import SwiftUI
 
 struct DailyBriefColumns: View {
     @ObservedObject private var store = DailyBriefStore.shared
+    /// Drives the "Connect to Gmail" prompt shown when both lists are still blank (nothing
+    /// synthesized, nothing typed) AND Gmail — the integration those lists are seeded from —
+    /// isn't connected.
+    @ObservedObject var connectCoordinator: DailyBriefConnectCoordinator
+    /// Re-run the synthesis (which seeds the lists) once Gmail connects.
+    var onConnected: () -> Void = {}
     /// Which row's text field currently has the keyboard — drives Return/Backspace focus moves.
     @State private var focusedItemID: String?
 
+    /// The Composio toolkit whose priority email seeds the catch-up / priorities lists.
+    private let emailToolkitSlug = "gmail"
+
+    /// True when neither list has any typed content — only the honest blank seed rows. Both
+    /// lists are filled together by the same email-driven synthesis, so when Gmail is missing
+    /// they're empty in lockstep and a single prompt stands in for the whole block.
+    private var bothListsBlank: Bool {
+        (store.catchUp + store.priorities).allSatisfy {
+            $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 40) {
-            DailyBriefEditableColumn(
-                heading: "Catch up:",
-                kind: .catchUp,
-                items: store.catchUp,
-                showsCheckbox: false,
-                store: store,
-                focusedItemID: $focusedItemID
+        if bothListsBlank, connectCoordinator.canOfferConnect(emailToolkitSlug) {
+            DailyBriefConnectPrompt(
+                toolkitSlug: emailToolkitSlug,
+                coordinator: connectCoordinator,
+                onConnected: onConnected
             )
-            DailyBriefEditableColumn(
-                heading: "Today's priorities:",
-                kind: .priorities,
-                items: store.priorities,
-                showsCheckbox: true,
-                store: store,
-                focusedItemID: $focusedItemID
-            )
+            .frame(maxWidth: .infinity)
+        } else {
+            HStack(alignment: .top, spacing: 40) {
+                DailyBriefEditableColumn(
+                    heading: "Catch up:",
+                    kind: .catchUp,
+                    items: store.catchUp,
+                    showsCheckbox: false,
+                    store: store,
+                    focusedItemID: $focusedItemID
+                )
+                DailyBriefEditableColumn(
+                    heading: "Today's priorities:",
+                    kind: .priorities,
+                    items: store.priorities,
+                    showsCheckbox: true,
+                    store: store,
+                    focusedItemID: $focusedItemID
+                )
+            }
         }
     }
 }
