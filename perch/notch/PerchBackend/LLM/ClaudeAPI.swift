@@ -233,14 +233,20 @@ class ClaudeAPI {
     Decide whether answering the user's latest message requires LOOKING at what is \
     currently on their screen. Answer YES whenever the message points at something \
     the user is currently looking at instead of naming it explicitly — including \
-    demonstratives like "this", "that", "these", "those", "here", phrases like \
-    "which of these", "the one at the top", "on my screen", "the highlighted one", \
-    or reading their current window / pointing at a UI element. For example, "which \
-    of these movies are on Netflix?" is YES, because "these movies" are on their \
-    screen and you must read them to answer. \
-    General knowledge, casual conversation, writing, math, and coding questions that \
-    name their subject explicitly do NOT require the screen. When genuinely unsure, \
-    answer YES. Reply with exactly one word: YES or NO.
+    demonstratives like "this", "that", "these", "those", and especially "here" \
+    ("what do I write here", "what goes here", "help me with what to write here", \
+    "fix this"), phrases like "which of these", "the one at the top", "on my \
+    screen", "the highlighted one", or reading their current window / pointing at a \
+    UI element. For example, "which of these movies are on Netflix?" is YES, because \
+    "these movies" are on their screen and you must read them to answer. \
+    Also answer YES whenever the request is vague or underspecified enough that you \
+    would otherwise have to ASK the user for more context (e.g. "could you help me \
+    with what to write here", "what should I put", "help me with this") — a \
+    screenshot usually supplies the missing context, so LOOK before asking. Only \
+    ask for clarification when even a screenshot wouldn't resolve it. \
+    Only general knowledge, casual conversation, and writing, math, and coding \
+    questions that name their subject explicitly do NOT require the screen. When \
+    genuinely unsure, answer YES. Reply with exactly one word: YES or NO.
     """
 
     /// The vision gate: decides whether answering this turn needs the screen. Runs

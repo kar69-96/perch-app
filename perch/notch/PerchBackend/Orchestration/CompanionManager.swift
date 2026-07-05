@@ -1628,7 +1628,7 @@ final class CompanionManager: ObservableObject {
                         // they already approved.
                         let alreadyAllowed = screenshotConsentPreapproved
                             || PerchCapabilityToggles.isScreenshotAlwaysAllowedNow()
-                        let consented = alreadyAllowed ? true : await requestScreenshotConsent(question: transcript)
+                        let consented = alreadyAllowed ? true : requestScreenshotConsent(question: transcript)
 
                         guard !Task.isCancelled else { return }
 
@@ -2390,20 +2390,35 @@ final class CompanionManager: ObservableObject {
 
     // MARK: - Just-in-time screenshot consent
 
-    /// Shows the centered screenshot consent pop-up and awaits the user's choice.
-    /// Returns whether Perch may capture the screen this turn. "Always Allow"
-    /// additionally persists the pref so the pop-up never appears again.
-    private func requestScreenshotConsent(question: String) async -> Bool {
-        let choice = await withCheckedContinuation { (continuation: CheckedContinuation<ScreenshotConsent, Never>) in
-            ScreenshotConsentPanel.shared.present(question: question) { continuation.resume(returning: $0) }
-        }
-        switch choice {
-        case .always:
+    /// Asks — via a native centered modal (`NSAlert`) — whether Perch may capture the
+    /// screen this turn, and returns the answer. Three choices:
+    ///   • "Allow"        → capture this once (does NOT persist — asks again next time).
+    ///   • "Always Allow" → capture and persist the pref, so it never asks again.
+    ///   • "Not Now"      → decline; answer text-only.
+    /// A modal is used deliberately over a custom floating panel: it is guaranteed to
+    /// surface in the middle of the screen AND to resolve (the run loop blocks until a
+    /// button is clicked), so a screen turn can never silently skip the prompt or hang
+    /// on a panel that failed to show. Only "Always Allow" mutes future prompts.
+    @MainActor
+    private func requestScreenshotConsent(question: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Let Perch see your screen?"
+        let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.informativeText = trimmedQuestion.isEmpty
+            ? "Perch will take one screenshot to answer what's on your screen."
+            : "Perch will take one screenshot to answer:\n\u{201C}\(trimmedQuestion)\u{201D}"
+        alert.addButton(withTitle: "Allow")          // .alertFirstButtonReturn
+        alert.addButton(withTitle: "Always Allow")   // .alertSecondButtonReturn
+        alert.addButton(withTitle: "Not Now")        // .alertThirdButtonReturn
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return true
+        case .alertSecondButtonReturn:
             PerchCapabilityToggles.setScreenshotAlwaysAllowed(true)
             return true
-        case .once:
-            return true
-        case .no:
+        default:
             return false
         }
     }

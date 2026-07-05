@@ -39,6 +39,13 @@ enum VisionGateDeicticGuard {
         #"\b(?:this|that)\s+(?:page|screen|window|tab|site|list|menu|image|photo|picture|document|doc|file|code|error|message|table|chart|graph|form|article|email|thread|paragraph|line|button|dialog|popup|notification|post|tweet|video|cell|column|row|field)\b"#,
         // Bare "what is / what's this/that" — a question about a thing on screen.
         #"\bwhat(?:'?s| is| does| are)\s+(?:this|that|these|those)\b"#,
+        // "here" pointing at a spot on the screen — "what do I write here", "what
+        // goes here", "help me with what to write here", "click right here". For a
+        // desktop assistant "here" almost always means a place on screen, so
+        // capture rather than answer blind (the user asked us to lean this way).
+        #"\b(?:write|type|put|enter|fill|add|insert|paste|click|tap|select|choose|go|goes|belongs?)\b[^.?!]{0,40}\bhere\b"#,
+        #"\b(?:what|where|which|how|help)\b[^.?!]{0,40}\bhere\b"#,
+        #"\b(?:right|over)\s+here\b"#,
     ]
 
     /// Whether the latest message contains an unambiguous on-screen deictic
