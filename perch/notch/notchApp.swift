@@ -19,10 +19,12 @@ struct DynamicNotchApp: App {
     @Environment(\.openWindow) var openWindow
 
     let updaterController: SPUStandardUpdaterController
+    // Held strongly: SPUStandardUpdaterController references its delegate weakly.
+    private let updaterDelegate = PerchUpdaterDelegate()
 
     init() {
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+            startingUpdater: true, updaterDelegate: updaterDelegate, userDriverDelegate: nil)
 
         // Initialize the settings window controller with the updater controller
         SettingsWindowController.shared.setUpdaterController(updaterController)
@@ -37,6 +39,21 @@ struct DynamicNotchApp: App {
                 updater: updaterController.updater)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Marks the next launch as an in-place Sparkle update so the fresh-install
+/// detector keeps the user's onboarding, permissions, and sign-in. Without this,
+/// an auto-update — which replaces the app binary just like a fresh download —
+/// would wipe state and re-onboard on every release. Both hooks set the same
+/// one-shot marker (idempotent) to cover install-and-relaunch and install-on-quit.
+final class PerchUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        PerchFreshInstallDetector.markPendingUpdateRelaunch()
+    }
+
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        PerchFreshInstallDetector.markPendingUpdateRelaunch()
     }
 }
 
