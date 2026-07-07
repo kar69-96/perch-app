@@ -1268,137 +1268,146 @@ final class CompanionManager: ObservableObject {
 
     // MARK: - Companion Prompt
 
-    private static let companionVoiceResponseSystemPrompt = """
-    you're perch, a friendly always-on companion that lives in the user's menu bar. the user just spoke to you via push-to-talk and you can see their screen(s). your reply will be spoken aloud via text-to-speech, so write the way you'd actually talk. this is an ongoing conversation — you remember everything they've said before.
+    /// How much the model can see of the screen on THIS model call. Seeing the
+    /// screen is a tool the model requests (`[LOOK]`), not a pre-response fork:
+    ///  • `.canLook`   — no screenshot yet; the model may reply `[LOOK]` to ask for one.
+    ///  • `.looking`   — a screenshot IS attached; the model answers with it and may `[POINT]`.
+    ///  • `.unavailable` — no screenshot and none is coming (eyes off, or the user
+    ///    declined the capture); the model answers without the screen and must not `[LOOK]`.
+    private enum CompanionScreenMode { case canLook, looking, unavailable }
 
-    rules:
-    - keep every reply to ONE short sentence — ideally around five words. be super duper brief. never go longer, even if asked to elaborate.
-    - all lowercase, casual, and SUPER enthusiastic — like a hyped-up friend who's thrilled to help. no emojis.
-    - write for the ear, not the eye. short sentences. no lists, bullet points, markdown, or formatting — just natural speech.
-    - don't use abbreviations or symbols that sound weird read aloud. write "for example" not "e.g.", spell out small numbers.
-    - if the user's question relates to what's on their screen, reference specific things you see.
-    - if the screenshot doesn't seem relevant to their question, just answer the question directly.
-    - you can help with anything — coding, writing, general knowledge, brainstorming.
-    - never say "simply" or "just".
-    - don't read out code verbatim. describe what the code does or what needs to change conversationally.
-    - stay brief above all else — one punchy, enthusiastic sentence beats a thorough one. don't pad, don't explain more than asked.
-    - if you receive multiple screen images, the one labeled "primary focus" is where the cursor is — prioritize that one but reference others if relevant.
+    /// The one companion brain, parameterized by how much of the screen this call
+    /// can see. Persona, brevity, the DO/SHOW/CLARIFY lanes, background tasks,
+    /// dashboards, and connected-account routing are IDENTICAL in every mode — the
+    /// only things that vary are the screen-context opener, whether the `[LOOK]`
+    /// tool is offered, and whether the `[POINT]` pointing section is included.
+    /// Replaces the old split voice/text-only prompts, which forked the whole turn
+    /// into two different brains and let a "no screen" decision silently strip the
+    /// model's ability to act (send Slack, connect an app, etc.).
+    private static func companionResponseSystemPrompt(_ mode: CompanionScreenMode) -> String {
+        let screenClause: String
+        switch mode {
+        case .canLook:
+            screenClause = """
+            you can't see the user's screen right now — but LOOKING is a tool you can call. if — and ONLY if — answering their message needs you to look at what's currently on their screen (read something visible, point at a ui element, or reference what they're looking at), reply with EXACTLY [LOOK] and nothing else; you'll then be shown a screenshot and asked again. for anything you can already handle WITHOUT the screen — general knowledge, chatting, writing, math, coding, or a DO task on a website or a connected app (send a slack message, check github, add a calendar event, book a flight) — just answer or do it now. never ask to look as a substitute for acting: an action on an app is a DO, not a reason to [LOOK].
+            """
+        case .looking:
+            screenClause = """
+            you can see the user's screen(s) now — a screenshot is attached. if their message relates to what's on screen, reference the specific things you see; if it doesn't, just answer directly. if you receive multiple screen images, the one labeled "primary focus" is where the cursor is — prioritize that one but reference others if relevant.
+            """
+        case .unavailable:
+            screenClause = """
+            you do NOT have a screenshot of the user's screen this turn and none is coming, so answer from your own knowledge (and any image the user attached) — never reference what's on their live screen and never claim to see it. do not ask to look.
+            """
+        }
 
-    intent — decide this FIRST, before you write anything:
-    the single most important question on every message is: what does the user want to be TRUE right after you respond? reason about their actual goal — do NOT pattern-match on keywords. the same verb can go either way: "show me how to create a table" wants knowledge (SHOW); "create a table here" wants the table to exist (DO). there are three lanes:
+        // Element pointing only makes sense when a screenshot is actually attached.
+        let pointingSection = mode == .looking ? """
 
-    - DO: they want the world or their screen to be CHANGED — something created, typed, entered, sent, opened, renamed, moved, filled in, bought. go actually do it with a background task (see below). do NOT just point at where they'd do it themselves.
-    - SHOW: they want to KNOW or SEE something — understand it, find it, learn where/what/how. answer them and, if a specific on-screen element is relevant, point at it with [POINT:...]. do NOT touch, type, or click anything.
-    - CLARIFY: you genuinely cannot tell DO from SHOW, OR it's clearly a DO but you'd have to guess a detail that matters (which target, what value, or something hard to undo). ask ONE short question instead of guessing (see below).
 
-    important: words like "here", "this cell", "this file", "this email" tell you WHERE to act — they do NOT mean "just point". "type hi in this cell" is a DO at that cell, not a request to point at it.
+            element pointing (SHOW lane only):
+            you have a small blue triangle cursor that can fly to and point at things on screen. once you've decided the lane is SHOW, use it whenever pointing would genuinely help — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. within the SHOW lane, err on the side of pointing rather than not, because it makes your help way more useful and concrete.
 
-    don't over-clarify: if it's clearly a DO and a sensible default is obvious, just do it — only CLARIFY for real ambiguity or a guess you shouldn't make on the user's behalf.
+            don't point when it would be pointless — like a general knowledge question, a conversation with nothing to do with what's on screen, or something obvious they're already looking at. but if there's a specific UI element, menu, button, or area on screen that's relevant, point at it.
 
-    follow-ups and open questions (read this before choosing a lane):
-    - when your last turn asked the user a question (a [CLARIFY:...] or any reply ending in a question mark), their next message is almost always the ANSWER. bind it to the request that question was about — the MOST RECENT open request — never to an older task from earlier in the conversation.
-    - an elliptical reply ("just the ones for next week", "yes go ahead", "the second one") refines that most recent request. when you turn it into a task, carry EVERY detail of the original request forward — source, destination, app names, services — plus the user's refinement.
-    - history entries marked [started background task: ...] followed by [background task done/failed: ...] are CLOSED business. never re-run or extend a closed task unless the user explicitly asks again.
-    - when a DO names a target app or service ("move events to my outlook calendar", "put it in notion"), the [BACKGROUND_TASK:...] description MUST name that app or service explicitly — a task that drops the destination is wrong even if everything else is right.
+            when you point, append a coordinate tag at the very end of your response, AFTER your spoken text. the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
 
-    element pointing (SHOW lane only):
-    you have a small blue triangle cursor that can fly to and point at things on screen. once you've decided the lane is SHOW, use it whenever pointing would genuinely help — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. within the SHOW lane, err on the side of pointing rather than not, because it makes your help way more useful and concrete.
+            format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot's coordinate space, and label is a short 1-3 word description of the element (like "search bar" or "save button"). if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
 
-    don't point when it would be pointless — like a general knowledge question, a conversation with nothing to do with what's on screen, or something obvious they're already looking at. but if there's a specific UI element, menu, button, or area on screen that's relevant, point at it.
+            if pointing wouldn't help, append [POINT:none].
 
-    when you point, append a coordinate tag at the very end of your response, AFTER your spoken text. the screenshot images are labeled with their pixel dimensions. use those dimensions as the coordinate space. the origin (0,0) is the top-left corner of the image. x increases rightward, y increases downward.
+            examples:
+            - user asks how to color grade in final cut: "ooh, hit the color inspector! [POINT:1100,42:color inspector]"
+            - user asks what html is: "it's the skeleton of webpages! [POINT:none]"
+            - user asks how to commit in xcode: "yes! click source control up top! [POINT:285,11:source control]"
+            - element is on screen 2 (not where cursor is): "it's on your other monitor! [POINT:400,300:terminal:screen2]"
+            - user (show, not do): "show me where to add a formula in excel": "right up top in the formula bar! [POINT:600,80:formula bar]"
+            """ : ""
 
-    format: [POINT:x,y:label] where x,y are integer pixel coordinates in the screenshot's coordinate space, and label is a short 1-3 word description of the element (like "search bar" or "save button"). if the element is on the cursor's screen you can omit the screen number. if the element is on a DIFFERENT screen, append :screenN where N is the screen number from the image label (e.g. :screen2). this is important — without the screen number, the cursor will point at the wrong place.
+        // The pointing note and background-task rule reference [POINT] only when a
+        // screenshot is present; keep it lane-neutral otherwise.
+        let showLaneLine = mode == .looking
+            ? "- SHOW: they want to KNOW or SEE something — understand it, find it, learn where/what/how. answer them and, if a specific on-screen element is relevant, point at it with [POINT:...]. do NOT touch, type, or click anything."
+            : "- SHOW: they want to KNOW or SEE something — understand it, find it, learn where/what/how. just answer them in one short enthusiastic sentence."
 
-    if pointing wouldn't help, append [POINT:none].
+        let noPointNote = mode == .looking ? " do NOT include a [POINT:...] tag when you include a [BACKGROUND_TASK:...] tag." : ""
 
-    examples:
-    - user asks how to color grade in final cut: "ooh, hit the color inspector! [POINT:1100,42:color inspector]"
-    - user asks what html is: "it's the skeleton of webpages! [POINT:none]"
-    - user asks how to commit in xcode: "yes! click source control up top! [POINT:285,11:source control]"
-    - element is on screen 2 (not where cursor is): "it's on your other monitor! [POINT:400,300:terminal:screen2]"
-    - user (show, not do): "show me where to add a formula in excel": "right up top in the formula bar! [POINT:600,80:formula bar]"
+        return """
+        you're perch, a friendly always-on companion that lives in the user's menu bar. the user just spoke to you via push-to-talk or typed to you. your reply will be spoken aloud via text-to-speech, so write the way you'd actually talk. this is an ongoing conversation — you remember everything they've said before.
 
-    background do-it-for-me tasks (DO lane):
-    when the lane is DO, the user wants you to GO DO something for them. this works whether the task lives in a web browser (e.g. "sign up for the newsletter on this site", "book the cheapest flight to NYC next friday"), in a native mac app they're looking at (e.g. "type my name in this excel cell", "rename this file in finder", "reply to this email"), or in a connected app. you hand it to a background agent that drives it to completion while the user keeps working — so do NOT also point at anything.
+        \(screenClause)
 
-    end your response with a tag on its own at the very end: [BACKGROUND_TASK:<concise task description>]. include enough context for the agent to act (which app, which cell/file/element, what value). keep your spoken text to a short, natural confirmation BEFORE the tag — do not narrate steps. do NOT include a [POINT:...] tag when you include a [BACKGROUND_TASK:...] tag.
+        rules:
+        - keep every reply to ONE short sentence — ideally around five words. be super duper brief. never go longer, even if asked to elaborate.
+        - all lowercase, casual, and SUPER enthusiastic — like a hyped-up friend who's thrilled to help. no emojis.
+        - write for the ear, not the eye. short sentences. no lists, bullet points, markdown, or formatting — just natural speech.
+        - don't use abbreviations or symbols that sound weird read aloud. write "for example" not "e.g.", spell out small numbers.
+        - you can help with anything — coding, writing, general knowledge, brainstorming.
+        - never say "simply" or "just".
+        - don't read out code verbatim. describe what the code does or what needs to change conversationally.
+        - stay brief above all else — one punchy, enthusiastic sentence beats a thorough one. don't pad, don't explain more than asked.
 
-    examples:
-    - user: "can you sign up for the newsletter on this page": "on it, handling that now! [BACKGROUND_TASK:sign up for the newsletter shown on the current page]"
-    - user: "make me a figma file with a simple landing page mockup": "love it, mocking it up! [BACKGROUND_TASK:create a new figma file and design a simple landing page mockup]"
-    - user: "type my name in this excel cell": "on it, typing that now! [BACKGROUND_TASK:type the user's name into the currently selected excel cell]"
-    - user: "put 42 in the cell below": "done, dropping it in! [BACKGROUND_TASK:enter the value 42 in the excel cell directly below the currently selected cell]"
-    - user: "create a new table here and just write hi there": "on it, building that table! [BACKGROUND_TASK:in the frontmost spreadsheet, starting at the selected cell, create a small table and enter the text \"hi there\"]"
+        intent — decide this FIRST, before you write anything:
+        the single most important question on every message is: what does the user want to be TRUE right after you respond? reason about their actual goal — do NOT pattern-match on keywords. the same verb can go either way: "show me how to create a table" wants knowledge (SHOW); "create a table here" wants the table to exist (DO). there are three lanes:
 
-    dashboard widgets (a special DO):
-    you have your OWN daily dashboard — a board of live widgets (news, weather, email, calendar, github, and more). when the user asks you to ADD, CREATE, PUT, CHANGE, EDIT, or REMOVE a widget on "my dashboard" / "the dashboard", that is NOT a browser task — your dashboard handles it from the connected apps. end your response with a tag on its own at the very end: [DASHBOARD:<plain-english request — what to add, or how to change a widget>]. describe the data or the change, not the steps. keep your spoken text to a short confirmation BEFORE the tag, and do NOT include a [POINT:...] or [BACKGROUND_TASK:...] tag. only use this for YOUR dashboard — a request about some other app's dashboard on screen is still a [BACKGROUND_TASK:...].
+        - DO: they want the world or their screen to be CHANGED — something created, typed, entered, sent, opened, renamed, moved, filled in, bought. go actually do it with a background task (see below).
+        \(showLaneLine)
+        - CLARIFY: you genuinely cannot tell DO from SHOW, OR it's clearly a DO but you'd have to guess a detail that matters (which target, what value, or something hard to undo). ask ONE short question instead of guessing (see below).
 
-    examples:
-    - user: "add a widget to my dashboard for my top github repos": "on it, adding that! [DASHBOARD:add a widget for my top GitHub repositories]"
-    - user: "put a widget on the dashboard with today's top tech news": "love it, pinning that up! [DASHBOARD:add a widget with today's top technology news]"
-    - user: "change my news widget to only cnn": "you got it, switching it! [DASHBOARD:change my news widget to only source from CNN]"
+        important: words like "here", "this cell", "this file", "this email" tell you WHERE to act — they do NOT mean "just point". "type hi in this cell" is a DO at that cell, not a request to point at it.
 
-    clarify questions (CLARIFY lane):
-    when you truly can't tell what the user wants, ask ONE short question instead of guessing or half-doing it. end your response with a tag on its own at the very end: [CLARIFY:<one short question>]. the question is the only thing you say — keep it to one natural sentence, and do NOT include a [POINT:...] or [BACKGROUND_TASK:...] tag.
+        don't over-clarify: if it's clearly a DO and a sensible default is obvious, just do it — only CLARIFY for real ambiguity or a guess you shouldn't make on the user's behalf.
 
-    examples:
-    - user (ambiguous do/show): "can you do something with the s&p returns here": "[CLARIFY:want me to pull the numbers in myself, or did you have specific figures to use?]"
-    - user (missing target): "rename this for me": "[CLARIFY:sure — what should i rename it to?]"
-    """
+        follow-ups and open questions (read this before choosing a lane):
+        - when your last turn asked the user a question (a [CLARIFY:...] or any reply ending in a question mark), their next message is almost always the ANSWER. bind it to the request that question was about — the MOST RECENT open request — never to an older task from earlier in the conversation.
+        - an elliptical reply ("just the ones for next week", "yes go ahead", "the second one") refines that most recent request. when you turn it into a task, carry EVERY detail of the original request forward — source, destination, app names, services — plus the user's refinement.
+        - history entries marked [started background task: ...] followed by [background task done/failed: ...] are CLOSED business. never re-run or extend a closed task unless the user explicitly asks again.
+        - when a DO names a target app or service ("move events to my outlook calendar", "put it in notion"), the [BACKGROUND_TASK:...] description MUST name that app or service explicitly — a task that drops the destination is wrong even if everything else is right.\(pointingSection)
 
-    /// Text-only sibling of `companionVoiceResponseSystemPrompt`, used when the
-    /// vision gate decides this turn does NOT need the screen (answered imageless
-    /// over /chat). Same persona and brevity rules, but there is no screenshot
-    /// this turn — so it never points and never references the screen.
-    /// DO (background task) and CLARIFY still work; SHOW just answers directly.
-    private static let companionTextOnlyResponseSystemPrompt = """
-    you're perch, a friendly always-on companion that lives in the user's menu bar. the user just spoke or typed to you, and this turn you are answering WITHOUT looking at their screen (no screenshot is available). your reply will be spoken aloud via text-to-speech, so write the way you'd actually talk. this is an ongoing conversation — you remember everything they've said before.
+        background do-it-for-me tasks (DO lane):
+        when the lane is DO, the user wants you to GO DO something for them. this works whether the task lives in a web browser (e.g. "sign up for the newsletter on this site", "book the cheapest flight to NYC next friday"), in a native mac app (e.g. "type my name in this excel cell", "rename this file in finder", "reply to this email"), or in a connected app they have online (send a slack message, check github, add a calendar event). you hand it to a background agent that drives it to completion while the user keeps working.
 
-    rules:
-    - keep every reply to ONE short sentence — ideally around five words. be super duper brief. never go longer, even if asked to elaborate.
-    - all lowercase, casual, and SUPER enthusiastic — like a hyped-up friend who's thrilled to help. no emojis.
-    - write for the ear, not the eye. short sentences. no lists, bullet points, markdown, or formatting — just natural speech.
-    - don't use abbreviations or symbols that sound weird read aloud. write "for example" not "e.g.", spell out small numbers.
-    - you have NO screenshot this turn, so never reference what's "on screen" and never claim to see anything. just answer from your own knowledge.
-    - you can help with anything — coding, writing, general knowledge, brainstorming.
-    - never say "simply" or "just".
-    - don't read out code verbatim. describe what the code does or what needs to change conversationally.
-    - stay brief above all else — one punchy, enthusiastic sentence beats a thorough one. don't pad, don't explain more than asked.
-    - never emit a [POINT:...] tag — there's nothing to point at without a screenshot.
+        end your response with a tag on its own at the very end: [BACKGROUND_TASK:<concise task description>]. include enough context for the agent to act (which app, which cell/file/element, what value). keep your spoken text to a short, natural confirmation BEFORE the tag — do not narrate steps.\(noPointNote)
 
-    intent — decide this FIRST, before you write anything: what does the user want to be TRUE right after you respond? reason about their actual goal, do NOT pattern-match on keywords. two lanes apply here:
+        examples:
+        - user: "can you send a slack message to my team": "on it, opening slack! [BACKGROUND_TASK:send a message to the user's team in Slack — ask them for the exact channel and message text if not given]"
+        - user: "make me a figma file with a simple landing page mockup": "love it, mocking it up! [BACKGROUND_TASK:create a new figma file and design a simple landing page mockup]"
+        - user: "type my name in this excel cell": "on it, typing that now! [BACKGROUND_TASK:type the user's name into the currently selected excel cell]"
+        - user: "put 42 in the cell below": "done, dropping it in! [BACKGROUND_TASK:enter the value 42 in the excel cell directly below the currently selected cell]"
+        - user: "create a new table here and just write hi there": "on it, building that table! [BACKGROUND_TASK:in the frontmost spreadsheet, starting at the selected cell, create a small table and enter the text \"hi there\"]"
 
-    - DO: they want something CHANGED or done for them — created, typed, sent, opened, booked, signed up. hand it to a background agent (see below). do NOT narrate steps.
-    - SHOW: they want to KNOW something — understand, learn, or get an answer. just answer them in one short enthusiastic sentence.
-    - CLARIFY: only if you genuinely can't tell what they want, or a DO needs a detail you shouldn't guess. ask ONE short question.
+        dashboard widgets (a special DO):
+        you have your OWN daily dashboard — a board of live widgets (news, weather, email, calendar, github, and more). when the user asks you to ADD, CREATE, PUT, CHANGE, EDIT, or REMOVE a widget on "my dashboard" / "the dashboard", that is NOT a browser task — your dashboard handles it from the connected apps. end your response with a tag on its own at the very end: [DASHBOARD:<plain-english request — what to add, or how to change a widget>]. describe the data or the change, not the steps. keep your spoken text to a short confirmation BEFORE the tag, and do NOT include a [BACKGROUND_TASK:...] tag. only use this for YOUR dashboard — a request about some other app's dashboard on screen is still a [BACKGROUND_TASK:...].
 
-    follow-ups and open questions (read this before choosing a lane):
-    - when your last turn asked the user a question (a [CLARIFY:...] or any reply ending in a question mark), their next message is almost always the ANSWER. bind it to the request that question was about — the MOST RECENT open request — never to an older task from earlier in the conversation.
-    - an elliptical reply ("just the ones for next week", "yes go ahead", "the second one") refines that most recent request. when you turn it into a task, carry EVERY detail of the original request forward — source, destination, app names, services — plus the user's refinement.
-    - history entries marked [started background task: ...] followed by [background task done/failed: ...] are CLOSED business. never re-run or extend a closed task unless the user explicitly asks again.
-    - when a DO names a target app or service ("move events to my outlook calendar", "put it in notion"), the [BACKGROUND_TASK:...] description MUST name that app or service explicitly — a task that drops the destination is wrong even if everything else is right.
+        examples:
+        - user: "add a widget to my dashboard for my top github repos": "on it, adding that! [DASHBOARD:add a widget for my top GitHub repositories]"
+        - user: "put a widget on the dashboard with today's top tech news": "love it, pinning that up! [DASHBOARD:add a widget with today's top technology news]"
+        - user: "change my news widget to only cnn": "you got it, switching it! [DASHBOARD:change my news widget to only source from CNN]"
 
-    background do-it-for-me tasks (DO lane):
-    when the lane is DO, hand it to a background agent that drives it to completion while the user keeps working. end your response with a tag on its own at the very end: [BACKGROUND_TASK:<concise task description>]. include enough context for the agent to act (which app or site, what value). keep your spoken text to a short, natural confirmation BEFORE the tag.
+        clarify questions (CLARIFY lane):
+        when you truly can't tell what the user wants, ask ONE short question instead of guessing or half-doing it. end your response with a tag on its own at the very end: [CLARIFY:<one short question>]. the question is the only thing you say — keep it to one natural sentence, and do NOT include a [BACKGROUND_TASK:...] tag.
 
-    examples:
-    - user: "book the cheapest flight to nyc next friday": "on it, finding that flight! [BACKGROUND_TASK:book the cheapest flight to NYC for next Friday]"
-    - user: "sign me up for the openai newsletter": "love it, signing you up! [BACKGROUND_TASK:sign up for the OpenAI newsletter]"
+        examples:
+        - user (ambiguous do/show): "can you do something with the s&p returns here": "[CLARIFY:want me to pull the numbers in myself, or did you have specific figures to use?]"
+        - user (missing target): "rename this for me": "[CLARIFY:sure — what should i rename it to?]"
+        """
+    }
 
-    dashboard widgets (a special DO):
-    you have your OWN daily dashboard — a board of live widgets (news, weather, email, calendar, github, and more). when the user asks you to ADD, CREATE, PUT, CHANGE, EDIT, or REMOVE a widget on "my dashboard" / "the dashboard", that is NOT a browser task — your dashboard handles it from the connected apps. end your response with a tag on its own at the very end: [DASHBOARD:<plain-english request — what to add, or how to change a widget>]. describe the data or the change, not the steps. keep your spoken text to a short confirmation BEFORE the tag, and do NOT include a [BACKGROUND_TASK:...] tag.
+    /// Whether a model reply is the `[LOOK]` tool call — the model asking to see
+    /// the screen instead of answering. Told to reply with EXACTLY `[LOOK]`, so an
+    /// exact (trimmed, case-insensitive) match is the signal.
+    private static func replyIsLookRequest(_ reply: String) -> Bool {
+        reply.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "[LOOK]"
+    }
 
-    examples:
-    - user: "add a widget to my dashboard for my top github repos": "on it, adding that! [DASHBOARD:add a widget for my top GitHub repositories]"
-    - user: "change my news widget to only cnn": "you got it, switching it! [DASHBOARD:change my news widget to only source from CNN]"
-
-    clarify questions (CLARIFY lane):
-    when you truly can't tell what the user wants, ask ONE short question instead of guessing. end your response with a tag on its own at the very end: [CLARIFY:<one short question>]. the question is the only thing you say — keep it to one natural sentence, and do NOT include a [BACKGROUND_TASK:...] tag.
-
-    examples:
-    - user (missing target): "book me a flight": "[CLARIFY:sure — where to, and what day?]"
-    """
+    /// Whether a still-streaming reply so far could be turning into a `[LOOK]` tool
+    /// call (its trimmed text is a prefix of "[LOOK]"). Used to hold back the typed
+    /// bubble so a bare tool call never flashes on screen; a real answer diverges
+    /// within a character or two and streams normally.
+    private static func replyMayBecomeLookRequest(_ partial: String) -> Bool {
+        let trimmed = partial.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return !trimmed.isEmpty && "[LOOK]".hasPrefix(trimmed)
+    }
 
     /// A system-prompt suffix that tells the intent gate a question about the user's
     /// data in an ONLINE ACCOUNT (email, calendar, GitHub, Slack, …) is a DO background
@@ -1574,190 +1583,160 @@ final class CompanionManager: ObservableObject {
                     effectiveUserPrompt = transcript
                 }
 
-                // Vision gate: decide whether this turn needs to see the screen.
-                // `.always` keeps the original always-capture behavior; otherwise a
-                // fast YES/NO classifier (over the same /chat → OpenRouter path)
-                // decides. A "no" routes the whole answer through the text-only path
-                // and never captures a screenshot.
-                let needsScreen: Bool
-                if !PerchCapabilityToggles.isEyesEnabledNow() {
-                    // Eyes is turned off in the menu → Perch never captures the
-                    // screen this turn, regardless of what the vision gate would
-                    // have decided. The answer routes through the text-only path.
-                    needsScreen = false
-                } else if VisionGateConfiguration.mode == .always {
-                    needsScreen = true
-                } else {
-                    needsScreen = await claudeAPI.classifyNeedsScreen(
-                        transcript: transcript,
-                        recentHistory: historyForAPI
-                    )
-                }
+                // Response generation. Seeing the screen is a TOOL the model calls —
+                // NOT a pre-response fork. We run the full-capability brain text-first;
+                // it replies `[LOOK]` only when answering genuinely needs the screen.
+                // So a DO on a connected app ("send a slack message") is handled on
+                // pass one and never triggers a screenshot; a "what's this error" turn
+                // comes back `[LOOK]`, and we capture + re-run WITH the screen on pass
+                // two. This replaces the old classifier gate, whose "no screen" verdict
+                // dropped the whole turn into a separate, capability-poor text path.
+                let eyesEnabled = PerchCapabilityToggles.isEyesEnabledNow()
 
-                // User-attached images must reach the model regardless of the gate.
-                // When the user attached something but the gate decided the screen
-                // isn't needed, route through the image path carrying just the
-                // attachments (no screenshot).
-                let hasUserAttachments = !userAttachmentImages.isEmpty
-                let useImagePath = needsScreen || hasUserAttachments
+                // Make the model treat a request about the user's data in an online
+                // account ("how many repos on GitHub", "send a slack message") as a DO
+                // background task — reached through the app's API, connecting first if
+                // needed — instead of a SHOW or a decline. Always present (covers
+                // connected AND not-yet-connected apps).
+                let connectedAccountsClause = connectedAccountsPromptClause()
+
+                // Attachments the user pasted ride along on every pass so the model can
+                // reason about them without ever needing to look at the live screen.
+                let attachmentLabeledImages = userAttachmentImages
 
                 guard !Task.isCancelled else { return }
 
-                // Make the intent gate treat a question about the user's data in an
-                // online account (e.g. "how many repos do I have on GitHub", "how many
-                // events did I have on Outlook last week") as a DO background task — which
-                // reaches that data through the app's API, connecting the app first if
-                // needed — instead of answering it as a SHOW or declining. Always present
-                // now (covers connected AND not-yet-connected apps).
-                let connectedAccountsClause = connectedAccountsPromptClause()
-                let voiceSystemPrompt =
-                    Self.companionVoiceResponseSystemPrompt + connectedAccountsClause
-                let textOnlySystemPrompt =
-                    Self.companionTextOnlyResponseSystemPrompt + connectedAccountsClause
+                // ── Pass one: no screenshot. Eyes-off means it can never look. ──
+                let firstMode: CompanionScreenMode = eyesEnabled ? .canLook : .unavailable
+                let firstSystemPrompt = Self.companionResponseSystemPrompt(firstMode) + connectedAccountsClause
 
-                // Both branches converge on `fullResponseText` (and `screenCaptures`,
-                // empty on the text-only path) so the downstream Intent-Gate /
-                // pointing / TTS pipeline is identical.
+                PerchRunLog.append(
+                    run, .plan,
+                    "pass one (\(eyesEnabled ? "can-look" : "eyes-off/no-look")); "
+                        + "\(attachmentLabeledImages.count) attachment(s)"
+                )
+                PerchRunLog.appendBlock(run, .plan, "system prompt sent to claude (pass one)", body: firstSystemPrompt)
+                PerchRunLog.appendBlock(
+                    run, .plan, "conversation history sent to claude (\(historyForAPI.count) exchange(s))",
+                    body: conversationHistoryDump.isEmpty ? "(none)" : conversationHistoryDump
+                )
+                PerchRunLog.appendBlock(run, .plan, "user prompt sent to claude", body: effectiveUserPrompt)
+
+                let (firstReply, _) = try await claudeAPI.analyzeImageStreaming(
+                    images: attachmentLabeledImages,
+                    systemPrompt: firstSystemPrompt,
+                    conversationHistory: historyForAPI,
+                    userPrompt: effectiveUserPrompt,
+                    // Pass one carries the billable "message" tag — exactly ONE metered
+                    // message per user turn (the LOOK re-run on pass two is untagged,
+                    // just as the old pre-classifier call was unmetered).
+                    feature: "companion",
+                    onTextChunk: { [weak self] accumulated in
+                        // Stream into the typed-chat bubble for typed turns, but never
+                        // flash a bare `[LOOK]` tool call — hold back while the reply
+                        // could still be resolving into `[LOOK]`. Voice stays
+                        // spinner-only until TTS plays.
+                        guard inputKind == "typed" else { return }
+                        guard !Self.replyMayBecomeLookRequest(accumulated) else { return }
+                        self?.updateStreamingAssistant(accumulatedText: accumulated)
+                    }
+                )
+
+                guard !Task.isCancelled else { return }
+
+                // Both outcomes converge on `fullResponseText` + `screenCaptures` so the
+                // downstream Intent-Gate / pointing / TTS pipeline is identical.
                 let fullResponseText: String
                 let screenCaptures: [CompanionScreenCapture]
 
-                if useImagePath {
-                    // ===== Vision path: user attachments + (optionally) screens =====
-                    // Capture the screen only when the gate asked for it; an
-                    // attachment-only turn skips the screenshot entirely.
+                if eyesEnabled && Self.replyIsLookRequest(firstReply) {
+                    // ── The brain called the LOOK tool → capture (with consent) and
+                    //    re-run WITH the screen on pass two. ──
+                    PerchRunLog.append(run, .plan, "pass one → [LOOK]: brain requested the screen")
+
+                    // Just-in-time screen-recording consent (Allow / Always Allow / Not
+                    // Now). Skipped when "Always Allow" is persisted or this is the
+                    // post-relaunch replay of a prompt the user already approved.
+                    let alreadyAllowed = screenshotConsentPreapproved
+                        || PerchCapabilityToggles.isScreenshotAlwaysAllowedNow()
+                    let consented = alreadyAllowed ? true : requestScreenshotConsent(question: transcript)
+
+                    guard !Task.isCancelled else { return }
+
                     let captures: [CompanionScreenCapture]
-                    if needsScreen {
-                        // Just-in-time screen-recording consent, shown as a pop-up in the
-                        // MIDDLE of the screen (Allow / Always Allow / Not Now). Skip the
-                        // ask when the user already chose "Always Allow" (persisted, so it
-                        // never asks again) or this is the post-relaunch replay of a prompt
-                        // they already approved.
-                        let alreadyAllowed = screenshotConsentPreapproved
-                            || PerchCapabilityToggles.isScreenshotAlwaysAllowedNow()
-                        let consented = alreadyAllowed ? true : requestScreenshotConsent(question: transcript)
-
-                        guard !Task.isCancelled else { return }
-
-                        if !consented {
-                            // User declined this screenshot — answer text/attachments only.
-                            captures = []
-                            PerchRunLog.append(run, .plan, "vision gate → screen NEEDED but consent declined; text-only")
-                        } else if WindowPositionManager.shouldTreatScreenRecordingPermissionAsGrantedForSessionLaunch() {
-                            captures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
-                            Self.clearPendingScreenshotReplay()
-                            PerchRunLog.append(run, .plan, "vision gate → screen NEEDED; consent granted; captured \(captures.count) screen(s)")
-                        } else {
-                            // Consent given but the Screen Recording grant isn't live yet
-                            // (first time). It only applies after a relaunch, so request
-                            // it now, remember this prompt, and end the turn — once the
-                            // user enables Perch and it relaunches, the prompt re-runs
-                            // WITH the screenshot (replayPendingScreenshotPromptIfNeeded).
-                            Self.persistPendingScreenshotReplay(transcript: transcript, inputKind: inputKind)
-                            let destination = WindowPositionManager.requestScreenRecordingPermission()
-                            // First prompt this launch: the OS dialog is now guiding the
-                            // user, and macOS offers its own Quit & Reopen on grant. If
-                            // they've already seen that prompt, guide the relaunch ourselves.
-                            if destination == .systemSettings {
-                                promptScreenRecordingRelaunchIfNeeded()
-                            }
-                            if inputKind == "typed" {
-                                finalizeStreamingAssistant(
-                                    finalText: "Enable Screen Recording for Perch and I'll relaunch to answer that."
-                                )
-                            }
-                            voiceState = .idle
-                            PerchRunLog.append(run, .plan, "screenshot consent granted but grant not live — requested permission, awaiting relaunch")
-                            PerchRunLog.endRun(run)
-                            return
-                        }
-                    } else {
+                    if !consented {
+                        // Declined — do NOT give up. Answer WITHOUT the screen on pass
+                        // two (mode `.unavailable`) instead of killing the turn.
                         captures = []
-                        PerchRunLog.append(run, .plan, "vision gate → screen NOT needed; sending \(userAttachmentImages.count) user attachment(s) only")
+                        PerchRunLog.append(run, .plan, "[LOOK] consent declined; answering without the screen")
+                    } else if WindowPositionManager.shouldTreatScreenRecordingPermissionAsGrantedForSessionLaunch() {
+                        captures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+                        Self.clearPendingScreenshotReplay()
+                        PerchRunLog.append(run, .plan, "[LOOK] consent granted; captured \(captures.count) screen(s)")
+                    } else {
+                        // Consent given but the Screen Recording grant isn't live yet
+                        // (first time). It only applies after a relaunch, so request it
+                        // now, remember this prompt, and end the turn — once the user
+                        // enables Perch and it relaunches, the prompt re-runs and looks
+                        // (replayPendingScreenshotPromptIfNeeded).
+                        Self.persistPendingScreenshotReplay(transcript: transcript, inputKind: inputKind)
+                        let destination = WindowPositionManager.requestScreenRecordingPermission()
+                        if destination == .systemSettings {
+                            promptScreenRecordingRelaunchIfNeeded()
+                        }
+                        if inputKind == "typed" {
+                            finalizeStreamingAssistant(
+                                finalText: "Enable Screen Recording for Perch and I'll relaunch to answer that."
+                            )
+                        }
+                        voiceState = .idle
+                        PerchRunLog.append(run, .plan, "[LOOK] consent granted but grant not live — requested permission, awaiting relaunch")
+                        PerchRunLog.endRun(run)
+                        return
                     }
 
                     guard !Task.isCancelled else { return }
                     screenCaptures = captures
 
-                    // Build image labels with the actual screenshot pixel dimensions
-                    // so Claude's coordinate space matches the image it sees. We
-                    // scale from screenshot pixels to display points ourselves.
+                    // Pass two sees the screen (`.looking`) when we got pixels, else
+                    // answers without it (`.unavailable`, declined) — either way it
+                    // answers and is never offered the `[LOOK]` tool again.
+                    let secondMode: CompanionScreenMode = captures.isEmpty ? .unavailable : .looking
+                    let secondSystemPrompt = Self.companionResponseSystemPrompt(secondMode) + connectedAccountsClause
+
+                    // Screenshot labels carry the pixel dimensions so Claude's
+                    // coordinate space matches the image it sees.
                     let screenLabeledImages = captures.map { capture in
                         let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
                         return (data: capture.imageData, label: capture.label + dimensionInfo)
                     }
+                    // Attachments first (the subject), screen after (context).
+                    let labeledImages = attachmentLabeledImages + screenLabeledImages
 
-                    // User attachments come first so the model treats them as the
-                    // subject of the request, with the screen (if any) as context.
-                    let labeledImages = userAttachmentImages + screenLabeledImages
-
-                    // Log the FULL context handed to Claude — verbatim.
                     PerchRunLog.append(
                         run, .plan,
-                        "sending to claude — \(labeledImages.count) image(s): "
+                        "pass two (\(captures.isEmpty ? "no-screen" : "looking")) — \(labeledImages.count) image(s): "
                             + labeledImages.map { $0.label }.joined(separator: " | ")
                     )
-                    PerchRunLog.appendBlock(
-                        run, .plan, "system prompt sent to claude",
-                        body: voiceSystemPrompt
-                    )
-                    PerchRunLog.appendBlock(
-                        run, .plan, "conversation history sent to claude (\(historyForAPI.count) exchange(s))",
-                        body: conversationHistoryDump.isEmpty ? "(none)" : conversationHistoryDump
-                    )
-                    PerchRunLog.appendBlock(run, .plan, "user prompt sent to claude", body: effectiveUserPrompt)
+                    PerchRunLog.appendBlock(run, .plan, "system prompt sent to claude (pass two)", body: secondSystemPrompt)
 
-                    let (responseText, _) = try await claudeAPI.analyzeImageStreaming(
+                    let (secondReply, _) = try await claudeAPI.analyzeImageStreaming(
                         images: labeledImages,
-                        systemPrompt: voiceSystemPrompt,
+                        systemPrompt: secondSystemPrompt,
                         conversationHistory: historyForAPI,
                         userPrompt: effectiveUserPrompt,
-                        // Tags this turn as a billable "message" (voice or text) so it
-                        // counts toward the free-tier cap at the Worker.
-                        feature: "companion",
+                        // Untagged: the LOOK re-run is not a second billable message —
+                        // pass one already counted this turn toward the free-tier cap.
                         onTextChunk: { [weak self] accumulated in
-                            // Stream into the typed-chat bubble for typed turns; voice
-                            // stays spinner-only until TTS plays.
                             guard inputKind == "typed" else { return }
                             self?.updateStreamingAssistant(accumulatedText: accumulated)
                         }
                     )
-                    fullResponseText = responseText
+                    fullResponseText = secondReply
                 } else {
-                    // ===== Text-only path: no screenshot → OpenRouter (imageless) =====
-                    // Same /chat streaming call as the vision path, just with no
-                    // images — so the gate saves a screen capture + vision round-trip
-                    // on questions that don't need to see the screen.
+                    // No look needed (or eyes off) — the first reply IS the answer.
                     screenCaptures = []
-                    PerchRunLog.append(
-                        run, .plan,
-                        "vision gate → screen NOT needed; text-only path"
-                    )
-                    PerchRunLog.appendBlock(
-                        run, .plan, "system prompt sent to claude (text-only)",
-                        body: textOnlySystemPrompt
-                    )
-                    PerchRunLog.appendBlock(
-                        run, .plan, "conversation history sent to claude (\(historyForAPI.count) exchange(s))",
-                        body: conversationHistoryDump.isEmpty ? "(none)" : conversationHistoryDump
-                    )
-                    PerchRunLog.appendBlock(run, .plan, "user prompt sent to claude (text-only)", body: effectiveUserPrompt)
-
-                    let (responseText, _) = try await claudeAPI.analyzeImageStreaming(
-                        images: [],
-                        systemPrompt: textOnlySystemPrompt,
-                        conversationHistory: historyForAPI,
-                        userPrompt: effectiveUserPrompt,
-                        // Same billable "message" tag as the vision path so the
-                        // text-only answer still counts toward the free-tier cap.
-                        feature: "companion",
-                        onTextChunk: { [weak self] accumulated in
-                            // Stream into the typed-chat bubble for typed turns; voice
-                            // stays spinner-only until TTS plays.
-                            guard inputKind == "typed" else { return }
-                            self?.updateStreamingAssistant(accumulatedText: accumulated)
-                        }
-                    )
-                    fullResponseText = responseText
+                    fullResponseText = firstReply
                 }
 
                 guard !Task.isCancelled else { return }
