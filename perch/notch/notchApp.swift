@@ -858,7 +858,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 ))
             window.isRestorable = false
-            window.identifier = NSUserInterfaceItemIdentifier("OnboardingWindow")
+            window.identifier = NSUserInterfaceItemIdentifier(OnboardingProgress.windowIdentifier)
 
             onboardingWindowController = NSWindowController(window: window)
         }

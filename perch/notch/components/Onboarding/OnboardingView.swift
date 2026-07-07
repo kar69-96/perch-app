@@ -38,6 +38,13 @@ enum OnboardingStep: String {
 enum OnboardingProgress {
     static let resumeStepKey = "perch.onboarding.resumeStep"
 
+    /// Identifier stamped on the onboarding `NSWindow` (see
+    /// `AppDelegate.showOnboardingWindow`). Lets other subsystems detect when the
+    /// onboarding window is actually on screen — a robust signal that onboarding is in
+    /// progress, unlike `resumeStepKey`, which clears the instant the finish screen
+    /// appears (before the user acts) and can go stale.
+    static let windowIdentifier = "OnboardingWindow"
+
     /// The step to resume at: the persisted in-progress step if there is one,
     /// otherwise the caller-provided starting step.
     static func resumeStep(defaultingTo fallback: OnboardingStep) -> OnboardingStep {

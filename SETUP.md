@@ -32,7 +32,7 @@ Applications folder, clears the Gatekeeper quarantine flag, and launches it.
 
 ```sh
 set -euo pipefail
-DMG_URL="https://github.com/Useperch/perch-app/releases/latest/download/notch.dmg"
+DMG_URL="https://github.com/Useperch/perch-app/releases/latest/download/perch.dmg"
 DEST="/Applications"            # or "$HOME/Applications"
 DMG="/tmp/Perch.dmg"            # or "$HOME/Downloads/Perch.dmg"
 
@@ -64,7 +64,7 @@ open "$DEST/Perch.app"
 
 If you'd rather click than run a script:
 
-1. Open the releases page and download `notch.dmg`:
+1. Open the releases page and download `perch.dmg`:
    <https://github.com/Useperch/perch-app/releases/latest>
 2. Double-click the downloaded DMG, then drag **Perch** onto the **Applications** folder.
 3. **Get past Gatekeeper.** Because Perch isn't notarized, the first launch shows

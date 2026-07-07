@@ -790,11 +790,6 @@ final class CompanionManager: ObservableObject {
         // Track individual permission grants as they happen
         if !previouslyHadAccessibility && hasAccessibilityPermission {
             PerchAnalytics.trackPermissionGranted(permission: "accessibility")
-            // The grant just arrived while Perch was running, so the push-to-talk tap
-            // is created but silently dead until relaunch (macOS won't relaunch for
-            // Accessibility on its own). Offer the one-time Quit & Reopen that makes the
-            // hotkeys actually fire.
-            promptAccessibilityRelaunchIfNeeded()
         }
         if !previouslyHadScreenRecording && hasScreenRecordingPermission {
             PerchAnalytics.trackPermissionGranted(permission: "screen_recording")
@@ -811,6 +806,17 @@ final class CompanionManager: ObservableObject {
         if !previouslyHadAll && allPermissionsGranted {
             PerchAnalytics.trackAllPermissionsGranted()
         }
+
+        // Recover a stale, non-delivering push-to-talk tap on EVERY poll — not just the
+        // instant the grant flips. A tap created after launch in a not-yet-trusted
+        // process stays silently dead until relaunch (Settings shows Perch ON but the
+        // hotkeys never fire). The old edge-triggered call fired once, was suppressed
+        // mid-onboarding, and could never re-fire — so a grant that landed during
+        // onboarding stranded a dead tap with no recovery. Driving it off the persistent
+        // condition here (self-guarded: needs-relaunch + onboarding-not-visible +
+        // once-per-launch) catches it after onboarding ends by any path, and after a
+        // grant made in System Settings while Perch runs.
+        promptAccessibilityRelaunchIfNeeded()
     }
 
     /// Triggers the macOS screen content picker by performing a dummy
@@ -2538,6 +2544,16 @@ final class CompanionManager: ObservableObject {
     /// Shown at most once per launch so the user isn't nagged repeatedly.
     private var hasPromptedAccessibilityRelaunchThisLaunch = false
 
+    /// True while the onboarding window is actually on screen. Used to suppress the
+    /// accessibility-relaunch prompt during onboarding (its Finish step owns the
+    /// relaunch) without depending on the persisted resume marker, which is cleared the
+    /// moment the finish screen appears and can go stale.
+    private var isOnboardingWindowVisible: Bool {
+        NSApp.windows.contains { window in
+            window.identifier?.rawValue == OnboardingProgress.windowIdentifier && window.isVisible
+        }
+    }
+
     /// Surfaces a one-time Quit & Reopen when Accessibility was granted while Perch was
     /// already running. The push-to-talk / double-Control CGEvent tap only delivers
     /// events in a process trusted at launch, and macOS — unlike Screen Recording —
@@ -2546,12 +2562,18 @@ final class CompanionManager: ObservableObject {
     /// A single relaunch recreates the tap in a trusted process and makes it live.
     private func promptAccessibilityRelaunchIfNeeded() {
         // Only relevant when the grant arrived after launch (a launch that was already
-        // trusted has a live tap and needs nothing).
+        // trusted has a live tap and needs nothing). This is the ground truth for a
+        // stale, non-delivering tap and is re-checked on every permission poll, so the
+        // recovery fires no matter HOW the grant landed or how onboarding was left —
+        // not just on the one-shot moment the grant flips.
         guard WindowPositionManager.accessibilityTapNeedsRelaunchToActivate() else { return }
-        // While onboarding is still in progress its end-of-flow auto-relaunch handles
-        // this — don't double up with a modal mid-flow. The resume marker exists only
-        // while onboarding is running (cleared at `.finished`).
-        guard UserDefaults.standard.string(forKey: OnboardingProgress.resumeStepKey) == nil else { return }
+        // While the onboarding window is on screen, its Finish step owns the relaunch —
+        // don't stack a modal on top of it. Keyed on the actual window, NOT the persisted
+        // resume marker: that marker clears the instant the finish screen appears (before
+        // the user clicks Finish) and can go stale, either of which would fire this at the
+        // wrong time or never. Once onboarding leaves the screen by ANY path — Finish,
+        // Open Settings, or a resume that landed past `.finished` — a dead tap is caught.
+        guard !isOnboardingWindowVisible else { return }
         guard !hasPromptedAccessibilityRelaunchThisLaunch else { return }
         hasPromptedAccessibilityRelaunchThisLaunch = true
 

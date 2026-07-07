@@ -4,7 +4,7 @@ set -euo pipefail
 # =============================================================================
 # package-release.sh — Build + package the public Perch release DMG.
 #
-# Produces dist/notch.dmg (the exact asset name SETUP.md and the site's
+# Produces dist/perch.dmg (the exact asset name SETUP.md and the site's
 # releases/latest/download URL expect), containing Perch.app with the prod
 # identity (app.perch.notch) and the browser-subagent sidecar bundled into
 # Contents/Resources.
@@ -76,7 +76,7 @@ DERIVED_DATA="$REPO_DIR/perch/build/DerivedData-release"
 SOURCE_APP="$DERIVED_DATA/Build/Products/Release/Perch.app"
 STAGING_DIR="$REPO_DIR/dist/staging"
 APP_COPY="$STAGING_DIR/Perch.app"
-DMG_PATH="$REPO_DIR/dist/notch.dmg"
+DMG_PATH="$REPO_DIR/dist/perch.dmg"
 VOLUME_NAME="Perch"
 SIGN_IDENTITY="Perch Self Signed"
 KEYCHAIN="$HOME/Library/Keychains/perchdev.keychain-db"
@@ -237,7 +237,7 @@ item = f"""        <item>
             <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <description><![CDATA[{notes}]]></description>
-            <enclosure url="https://github.com/Useperch/perch-app/releases/download/v{version}/notch.dmg" length="{env["DMG_LENGTH"]}" type="application/octet-stream" sparkle:edSignature="{env["ED_SIGNATURE"]}"/>
+            <enclosure url="https://github.com/Useperch/perch-app/releases/download/v{version}/perch.dmg" length="{env["DMG_LENGTH"]}" type="application/octet-stream" sparkle:edSignature="{env["ED_SIGNATURE"]}"/>
         </item>"""
 
 with open(appcast) as f:
@@ -275,8 +275,9 @@ cat <<EOF
 Publish — updates reach installed apps only after BOTH steps:
   1. gh release create v$VERSION "$DMG_PATH" --target main \\
          --title "Perch v$VERSION" --notes "…"
-     (asset name must stay notch.dmg — SETUP.md, the site, and the appcast
-      enclosure URL all depend on it)
+     (asset name must stay perch.dmg — SETUP.md, the site, and the appcast
+      enclosure URL all depend on it. Releases v2.7.10 and earlier shipped
+      notch.dmg; their appcast history entries keep that old name.)
   2. git add perch/updater/appcast.xml && git commit && git push
      (installed apps poll the appcast from raw.githubusercontent.com/…/main)
 
