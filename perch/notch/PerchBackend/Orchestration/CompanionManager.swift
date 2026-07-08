@@ -1350,7 +1350,7 @@ final class CompanionManager: ObservableObject {
         intent — decide this FIRST, before you write anything:
         the single most important question on every message is: what does the user want to be TRUE right after you respond? reason about their actual goal — do NOT pattern-match on keywords. the same verb can go either way: "show me how to create a table" wants knowledge (SHOW); "create a table here" wants the table to exist (DO). there are three lanes:
 
-        - DO: they want the world or their screen to be CHANGED — something created, typed, entered, sent, opened, renamed, moved, filled in, bought. go actually do it with a background task (see below).
+        - DO: they want the world, their screen, or their setup to be CHANGED or ACTED ON — something created, typed, entered, sent, opened, renamed, moved, filled in, bought, OR a media/device action carried out (play, pause, or skip a song, artist, playlist, or genre; change the volume; launch or quit an app). go actually do it with a background task (see below).
         \(showLaneLine)
         - CLARIFY: you genuinely cannot tell DO from SHOW, OR it's clearly a DO but you'd have to guess a detail that matters (which target, what value, or something hard to undo). ask ONE short question instead of guessing (see below).
 
