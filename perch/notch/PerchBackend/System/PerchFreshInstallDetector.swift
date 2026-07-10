@@ -39,7 +39,15 @@ import Foundation
 enum PerchFreshInstallDetector {
     private static let fingerprintKey = "lastInstallFingerprint"
     private static let pendingUpdateKey = "pendingUpdateRelaunch"
-    private static let installStatePlistName = "app.perch.notch.install-state"
+
+    /// PER-BUNDLE-ID state plist. The three flavors (Perch / Perch Dev / Perch
+    /// Beta) each keep their own fingerprint file — a single shared name meant
+    /// every launch of a DIFFERENT flavor overwrote the stored fingerprint, so
+    /// the next launch of the first flavor looked like a fresh download and had
+    /// its identity wiped (Composio connections orphaned with it).
+    private static var installStatePlistName: String {
+        "\(Bundle.main.bundleIdentifier ?? "app.perch.notch").install-state"
+    }
 
     /// Sentinel used in place of a real creation epoch for dev/repo builds, so a
     /// rebuild at the same path compares equal and never triggers a reset.
