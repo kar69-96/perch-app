@@ -40,7 +40,14 @@ final class BrowserSubagentProcessSupervisor {
     private static let defaultSocketPath = PerchSupportPaths.directory("ipc")
         .appendingPathComponent("subagent.sock").path
 
-    private static let socketAppearanceTimeoutSeconds = 8.0
+    /// How long to wait for the sidecar's IPC socket. A COLD spawn is not a few
+    /// seconds: after an app update/rebuild, run.sh rebuilds the sidecar venv
+    /// (pip install of the full dependency set — ~15 s cached, minutes on a slow
+    /// network). The previous 8 s window killed the very first background task
+    /// after every update — silently: no agent run, no connect card — while the
+    /// sidecar finished booting moments later. Dev masked this by pre-warming
+    /// (PerchWarmSidecarOnLaunch); beta spawns lazily and paid it on first use.
+    private static let socketAppearanceTimeoutSeconds = 180.0
     private static let socketPollIntervalSeconds = 0.1
 
     /// File the sidecar's stdout + stderr are redirected to. Without this the
