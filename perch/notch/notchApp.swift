@@ -479,7 +479,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Multi-user identity: register this install with the Worker gateway,
         // refreshing its install token and the server-side tracing kill switch.
         // Best-effort and non-blocking — the app runs fine before it completes.
-        Task { await PerchInstallIdentity.shared.register() }
+        //
+        // DEV: pre-warm the browser subagent right AFTER register() — warming spawns
+        // the sidecar, and the app injects the install token register() caches (the
+        // sidecar's OPENROUTER_API_KEY); warming before register races that to nil and
+        // the sidecar exits on MissingConfiguration. No-op in beta/release — gated by
+        // the dev-only PerchWarmSidecarOnLaunch flag inside warmUpIfConfigured().
+        Task {
+            await PerchInstallIdentity.shared.register()
+            companionManager.browserSubagentManager.warmUpIfConfigured()
+        }
 
         // Telemetry: flush any traces that failed to upload while offline, then
         // watch the sidecar's trace directory and ship completed agent runs.

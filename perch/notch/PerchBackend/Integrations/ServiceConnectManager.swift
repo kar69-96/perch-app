@@ -43,6 +43,16 @@ final class ServiceConnectManager: ServiceConnecting {
     private static let workerBaseURL = AppBundleConfiguration.stringValue(forKey: "WorkerBaseURL")
         ?? "https://your-worker-name.your-subdomain.workers.dev"
 
+    /// DEV-ONLY: when set (dev builds, via `build-perch-dev.sh`), the connect flow
+    /// reaches Composio DIRECTLY with the sidecar's own `browser-subagent/.env` key
+    /// instead of routing through the Worker proxy — keeping dev's Composio project
+    /// isolated from beta. Mirrors `BrowserSubagentProcessSupervisor.isComposioDirect`;
+    /// absent for beta (asserted by `verify-release-config.sh`), so the release keeps
+    /// the proxy swap that holds the real key server-side.
+    private static var isComposioDirect: Bool {
+        AppBundleConfiguration.isFlagEnabled(forKey: "PerchComposioDirect")
+    }
+
     private let manifestReader: ComposioManifestReader
 
     private var connectProcess: Process?
@@ -124,8 +134,13 @@ final class ServiceConnectManager: ServiceConnecting {
         // connection would land in a shared entity visible to other users. Only
         // injected when the install is registered; otherwise the connect flow
         // falls back to the local .env (developer running their own key).
+        //
+        // On the dev line (`isComposioDirect`) we skip the injection entirely, so
+        // the connect runs against the sidecar's own dev Composio key from
+        // `browser-subagent/.env` — the same isolated dev project the agent uses.
         var environment = ProcessInfo.processInfo.environment
-        if let installToken = PerchInstallIdentity.currentInstallToken(),
+        if !Self.isComposioDirect,
+           let installToken = PerchInstallIdentity.currentInstallToken(),
            let installId = PerchInstallIdentity.currentInstallId() {
             environment["COMPOSIO_BASE_URL"] = "\(Self.workerBaseURL)/composio"
             environment["COMPOSIO_API_KEY"] = installToken

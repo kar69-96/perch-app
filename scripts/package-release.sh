@@ -109,10 +109,14 @@ cp -R "$SOURCE_APP" "$APP_COPY"
 # ── 3. Clear machine-specific Info.plist paths ───────────────────────────────
 echo "▶︎ Clearing machine-specific Info.plist paths…"
 PLIST="$APP_COPY/Contents/Info.plist"
-# PerchLocalBrowserEnabled is the DEV-ONLY on-computer browser opt-in — stripped here
-# so a release NEVER enables the local browser lane for beta users, regardless of how
-# the app was built. See the /sync skill's "DEV-ONLY CAPABILITIES" section.
-for key in BrowserSubagentPath PerchRepoRoot BrowserSubagentSocketPath PerchLocalBrowserEnabled; do
+# PerchLocalBrowserEnabled is the DEV-ONLY on-computer browser opt-in,
+# PerchWarmSidecarOnLaunch is the DEV-ONLY eager-sidecar-warm flag, and
+# PerchComposioDirect is the DEV-ONLY "reach Composio directly with the dev key"
+# flag — all stripped here so a release NEVER enables the local browser lane, spawns
+# the sidecar lazily for beta users, and always routes Composio through the Worker
+# proxy (real key server-side, tenants siloed), regardless of how the app was built.
+# See the /sync skill's "DEV-ONLY CAPABILITIES" section.
+for key in BrowserSubagentPath PerchRepoRoot BrowserSubagentSocketPath PerchLocalBrowserEnabled PerchWarmSidecarOnLaunch PerchComposioDirect; do
     plutil -remove "$key" "$PLIST" 2>/dev/null || true
 done
 

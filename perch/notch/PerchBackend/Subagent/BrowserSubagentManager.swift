@@ -380,6 +380,23 @@ final class BrowserSubagentManager: ObservableObject {
 
     // MARK: - Private
 
+    /// DEV warm-up: eagerly spawn + connect the sidecar at app launch so the first
+    /// agent action doesn't pay the spawn/venv cost — the sidecar is already "up".
+    /// Gated by the dev-only Info.plist flag `PerchWarmSidecarOnLaunch` (set by
+    /// build-perch-dev.sh, stripped by package-release.sh), so BETA keeps spawning the
+    /// sidecar lazily on first use. Best-effort: on failure the normal lazy path in
+    /// startTask() still applies. No Apple Events are sent by warming, so this never
+    /// triggers a permission prompt on its own.
+    func warmUpIfConfigured() {
+        let flag = AppBundleConfiguration.stringValue(forKey: "PerchWarmSidecarOnLaunch")
+        guard let flag, ["1", "true", "yes", "on"].contains(flag.lowercased()) else { return }
+        Task { [weak self] in
+            do { try await self?.connectIfNeeded() } catch {
+                print("⚠️ BrowserSubagentManager: sidecar warm-up failed (lazy path still applies): \(error)")
+            }
+        }
+    }
+
     private func connectIfNeeded() async throws {
         guard !isConnected else { return }
         let socketPath = try await processSupervisor.ensureRunning()

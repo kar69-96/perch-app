@@ -9,11 +9,24 @@ import Foundation
 /// machine and CI can point at different checkouts without code changes.
 final class BrowserSubagentProcessSupervisor {
 
-    enum SupervisorError: Error {
+    enum SupervisorError: Error, LocalizedError {
         case sidecarPathMissing
         case runScriptMissing(String)
         case socketNeverAppeared
         case launchFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .sidecarPathMissing:
+                return "The browser subagent directory could not be found."
+            case let .runScriptMissing(path):
+                return "run.sh was not found at \(path)."
+            case .socketNeverAppeared:
+                return "The browser subagent started but never bound its socket."
+            case let .launchFailed(reason):
+                return "The browser subagent failed to launch: \(reason)"
+            }
+        }
     }
 
     /// Info.plist key holding the absolute path to the `browser-subagent/` directory.
@@ -52,6 +65,18 @@ final class BrowserSubagentProcessSupervisor {
             return false
         }
         return ["1", "true", "yes", "on"].contains(raw.lowercased())
+    }
+
+    /// Whether this build reaches Composio DIRECTLY instead of through the Worker
+    /// proxy, via the Info.plist `PerchComposioDirect` flag. DEV-ONLY: dev builds
+    /// (`build-perch-dev.sh`) set it so the app injects NO Composio env and the
+    /// sidecar uses its own isolated dev key from `browser-subagent/.env` — dev's
+    /// Composio project never touches beta's. The signed release never sets it
+    /// (and `verify-release-config.sh` asserts its absence), so beta keeps routing
+    /// every Composio call through the Worker (real project key stays server-side,
+    /// tenants stay siloed).
+    private static var isComposioDirect: Bool {
+        AppBundleConfiguration.isFlagEnabled(forKey: "PerchComposioDirect")
     }
 
     private var sidecarProcess: Process?
@@ -146,6 +171,14 @@ final class BrowserSubagentProcessSupervisor {
 
         // A login shell (-lc) picks up the user's Python toolchain from their
         // shell profile, matching how the app launches other helper scripts.
+        //
+        // NOTE: the app must be able to exec run.sh from `sidecarDirectory`. macOS
+        // denies this app's child `exec`/read of files under a protected folder
+        // (e.g. ~/Downloads), so a DEV build must NOT point BrowserSubagentPath at a
+        // repo checkout that lives there — build-perch-dev.sh stages the sidecar into
+        // a non-protected dir (~/.perch-dev-sidecar) and points here at the copy.
+        // Keeping the sidecar the app's own child is what lets its `osascript` Apple
+        // Events persist their Automation grant (a detached sidecar re-prompts forever).
         let quotedDirectory = Self.shellQuote(sidecarDirectory)
         let quotedSocketPath = Self.shellQuote(socketPath)
         let command = "cd \(quotedDirectory) && ./run.sh --socket \(quotedSocketPath)"
@@ -173,7 +206,13 @@ final class BrowserSubagentProcessSupervisor {
             // entity, so COMPOSIO_USER_ID must be the install id — a shared or
             // default entity would commingle users' connected accounts (the
             // sidecar refuses to enable Composio in that case, see config.py).
-            if let installId = PerchInstallIdentity.currentInstallId() {
+            //
+            // EXCEPT on the dev line (`isComposioDirect`): there we inject NOTHING,
+            // so the sidecar falls back to its own `browser-subagent/.env` — a
+            // separate dev Composio project key — and its SDK talks to Composio
+            // DIRECTLY. That keeps dev's Composio fully isolated from beta's, and
+            // is why the local Worker needs no Composio proxy for dev.
+            if !Self.isComposioDirect, let installId = PerchInstallIdentity.currentInstallId() {
                 environment["COMPOSIO_BASE_URL"] = "\(Self.workerBaseURL)/composio"
                 environment["COMPOSIO_API_KEY"] = installToken
                 environment["COMPOSIO_USER_ID"] = installId
@@ -185,8 +224,9 @@ final class BrowserSubagentProcessSupervisor {
         // run.sh CANNOT create its .venv / download Chromium next to the source —
         // writing into the bundle would fail and would break the code signature.
         // Point run.sh's mutable state at the writable support dir instead; run.sh
-        // reads PERCH_SIDECAR_STATE_DIR. A plain source/dev checkout leaves this
-        // unset and keeps its .venv in-place, exactly as before.
+        // reads PERCH_SIDECAR_STATE_DIR. A dev build points BrowserSubagentPath at a
+        // staged copy in ~/.perch-dev-sidecar (not the bundle, not ~/Downloads), so
+        // this stays unset there and .venv lives in-place beside the staged copy.
         if sidecarDirectory.hasPrefix(Bundle.main.bundlePath) {
             environment["PERCH_SIDECAR_STATE_DIR"] = PerchSupportPaths.directory("sidecar").path
         }

@@ -25,4 +25,15 @@ enum AppBundleConfiguration {
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedValue.isEmpty ? nil : trimmedValue
     }
+
+    /// Reads a boolean feature flag from the app bundle. A key set to any of
+    /// `1`/`true`/`yes`/`on` (case-insensitive) is enabled; a missing or empty key
+    /// is disabled — the safe default, so a flag only turns on where a build script
+    /// explicitly wrote it into the bundle (e.g. the DEV-only build patches the plist).
+    static func isFlagEnabled(forKey key: String) -> Bool {
+        guard let rawValue = stringValue(forKey: key) else {
+            return false
+        }
+        return ["1", "true", "yes", "on"].contains(rawValue.lowercased())
+    }
 }
